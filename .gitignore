@@ -1,0 +1,36 @@
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+*.manifest
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Home Assistant specific
+.HA_VERSION
+.DS_Store
+*.log
+*.db
+*.db-shm
+*.db-wal
+secrets.yaml
+home-assistant.log
+
+# IDE files
+.vscode/
+.idea/
+
+# Local Environment
+venv/
+.venv/
+env/
+
+# Data files (Chặn upload file DB nếu lỡ tay copy vào thư mục code)
+shopping_data.db
+shopping_data_*.db
+
+# OS specific
+Thumbs.db
