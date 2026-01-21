@@ -1,0 +1,94 @@
+add_order:
+  name: "Thêm đơn hàng mới"
+  description: "Ghi nhận mua sắm vào cơ sở dữ liệu. Các trường có dấu * là bắt buộc."
+  fields:
+    entry_id:
+      name: "Entry ID *"
+      description: "ID của Integration (Vào Settings > Integrations > Shopping History > 3 chấm > Copy Entry ID)."
+      required: true
+      selector:
+        text:
+    name:
+      name: "Tên hàng hóa *"
+      description: "Ví dụ: iPhone 15 Pro Max"
+      required: true
+      selector:
+        text:
+    place:
+      name: "Nơi mua hàng *"
+      description: "Ví dụ: Shopee, Tiki, Điện Máy Xanh..."
+      required: true
+      selector:
+        text:
+    category:
+      name: "Ngành hàng *"
+      description: "Ví dụ: Công nghệ, Đồ gia dụng, Thực phẩm..."
+      required: true
+      selector:
+        text:
+    price:
+      name: "Đơn giá (VNĐ) *"
+      description: "Giá trị đơn hàng (chưa hoặc đã gồm thuế tùy cách nhập)."
+      required: true
+      selector:
+        number:
+          min: 0
+          mode: box
+          unit_of_measurement: "VNĐ"
+    quantity:
+      name: "Số lượng *"
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 0.1
+          mode: box
+          step: 0.1
+    vat:
+      name: "Thuế VAT (%)"
+      description: "Nhập 0 nếu không có thuế hoặc giá đã bao gồm thuế."
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box
+          unit_of_measurement: "%"
+    status:
+      name: "Tình trạng *"
+      required: true
+      default: "Mới"
+      selector:
+        select:
+          options:
+            - "Mới"
+            - "Cũ / Like New"
+            - "Hàng trưng bày"
+            - "Hỏng / Xác"
+    model:
+      name: "Model / Mã sản phẩm"
+      required: false
+      selector:
+        text:
+    manufacturer:
+      name: "Hãng sản xuất"
+      required: false
+      selector:
+        text:
+    warranty_months:
+      name: "Thời gian bảo hành (tháng)"
+      description: "Nhập 0 nếu không có bảo hành."
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          mode: box
+          unit_of_measurement: "tháng"
+    purchase_date:
+      name: "Ngày mua"
+      description: "Mặc định là Hôm nay nếu để trống."
+      required: false
+      selector:
+        date:
