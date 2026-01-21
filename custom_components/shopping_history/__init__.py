@@ -16,11 +16,11 @@ from .const import DOMAIN, CONF_FRIENDLY_NAME, SIGNAL_UPDATE_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
 
-# Validate dữ liệu đầu vào chặt chẽ
+# Validate dữ liệu đầu vào
 SERVICE_ADD_ORDER_SCHEMA = vol.Schema({
     vol.Required("entry_id"): cv.string,
     vol.Required("name"): cv.string,
-    vol.Required("place"): cv.string, # Cột mới: Nơi mua
+    vol.Required("place"): cv.string,
     vol.Required("category"): cv.string,
     vol.Required("price"): vol.Coerce(float),
     vol.Required("quantity"): vol.Coerce(float),
@@ -36,17 +36,21 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Thiết lập integration từ config entry."""
+    # --- CẤU HÌNH ĐƯỜNG DẪN AN TOÀN ---
+    # Lưu file DB ra ngoài folder custom_components để tránh mất dữ liệu khi update HACS
     storage_dir = hass.config.path("shopping_history")
-    # Tạo thư mục lưu data nếu chưa có
+    
     if not os.path.exists(storage_dir):
-        await hass.async_add_executor_job(os.makedirs, storage_dir, 511, True)
+        await hass.async_add_executor_job(os.makedirs, storage_dir)
 
-    db_path = os.path.join(storage_dir, f"shopping_data_{entry.entry_id}.db")
+    db_path = os.path.join(storage_dir, f"shopping_data.db")
+    
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {"db_path": db_path}
 
-    # --- HÀM KHỞI TẠO DATABASE (Chạy trong luồng riêng) ---
+    _LOGGER.info(f"Shopping History Database stored at: {db_path}")
+
+    # --- HÀM KHỞI TẠO DATABASE ---
     def init_db():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -58,7 +62,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ngay_mua TEXT,
                 nam INTEGER, thang INTEGER, ngay INTEGER,
                 ten_hang TEXT,
-                noi_mua TEXT, -- Nơi mua
+                noi_mua TEXT,
                 so_luong REAL,
                 don_gia REAL,
                 thanh_tien REAL,
@@ -74,17 +78,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         """)
         
-        # 2. MIGRATION: Tự động thêm cột noi_mua nếu DB cũ chưa có
+        # 2. Migration: Thêm cột noi_mua nếu DB cũ chưa có
         try:
             cursor.execute("PRAGMA table_info(purchases)")
             columns = [info[1] for info in cursor.fetchall()]
             if "noi_mua" not in columns:
-                _LOGGER.info("Shopping History: Đang cập nhật Database (thêm cột noi_mua)...")
                 cursor.execute("ALTER TABLE purchases ADD COLUMN noi_mua TEXT DEFAULT 'Không rõ'")
         except Exception as e:
-            _LOGGER.error(f"Lỗi migration Shopping History: {e}")
+            _LOGGER.error(f"Migration Error: {e}")
 
-        # 3. Tạo các bảng thống kê (Monthly, Yearly, Category, Grand Total)
+        # 3. Tạo các bảng thống kê
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS monthly_stats (
                 nam INTEGER, thang INTEGER,
@@ -115,18 +118,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         conn.commit()
         conn.close()
 
-    # CHẠY INIT DB TRONG EXECUTOR ĐỂ KHÔNG LÀM CHẬM HOME ASSISTANT
     await hass.async_add_executor_job(init_db)
-
 
     # --- SERVICE XỬ LÝ NHẬP LIỆU ---
     async def handle_add_order(call: ServiceCall):
         entry_id_call = call.data.get("entry_id")
         if entry_id_call != entry.entry_id:
-            _LOGGER.warning("Sai Entry ID khi gọi service Shopping History")
-            return
+             _LOGGER.debug(f"Service called with entry_id {entry_id_call}, expected {entry.entry_id}")
 
-        # Dữ liệu đã được validate bởi SCHEMA
         data = call.data
         
         if data.get("purchase_date"):
@@ -137,23 +136,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         y, m, d = purchase_dt.year, purchase_dt.month, purchase_dt.day
         date_str = purchase_dt.strftime("%Y-%m-%d")
 
-        # Tính toán tiền tệ
+        # Tính toán
         total_pre_tax = data["price"] * data["quantity"]
         vat_amt = total_pre_tax * (data["vat"] / 100) if data["vat"] > 0 else 0
         total_post_tax = total_pre_tax + vat_amt
 
-        # Tính ngày hết hạn bảo hành
         warranty_end_str = ""
         if data["warranty_months"] > 0:
             end_date = purchase_dt + relativedelta(months=data["warranty_months"])
             warranty_end_str = end_date.strftime("%Y-%m-%d")
 
-        # Hàm ghi DB (Chạy ở luồng riêng)
         def db_insert_work():
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
 
-            # A. Insert vào bảng chính
+            # Insert Purchase
             cursor.execute("""
                 INSERT INTO purchases (
                     ngay_mua, nam, thang, ngay, 
@@ -170,23 +167,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 data["warranty_months"], warranty_end_str
             ))
 
-            # B. Cập nhật thống kê Tháng
+            # Recalculate Stats
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nam=? AND thang=?", (y, m))
             m_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO monthly_stats VALUES (?, ?, ?, ?, ?)", (y, m, m_res[0] or 0, m_res[1] or 0, m_res[2] or 0))
 
-            # C. Cập nhật thống kê Năm
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nam=?", (y,))
             y_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO yearly_stats VALUES (?, ?, ?, ?)", (y, y_res[0] or 0, y_res[1] or 0, y_res[2] or 0))
 
-            # D. Cập nhật thống kê Ngành hàng
             cat = data["category"]
             cursor.execute("SELECT SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nganh_hang=?", (cat,))
             c_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO category_stats VALUES (?, ?, ?)", (cat, c_res[0] or 0, c_res[1] or 0))
 
-            # E. Cập nhật Tổng tích lũy
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases")
             g_res = cursor.fetchone()
             cursor.execute("DELETE FROM grand_total")
@@ -195,25 +189,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             conn.commit()
             conn.close()
 
-        # Thực thi ghi DB
         await hass.async_add_executor_job(db_insert_work)
-        
-        # Bắn tín hiệu cập nhật Sensor NGAY LẬP TỨC
+        # Gửi tín hiệu cập nhật
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry.entry_id}")
 
-    # Đăng ký service
     hass.services.async_register(DOMAIN, "add_order", handle_add_order, schema=SERVICE_ADD_ORDER_SCHEMA)
     
-    # Forward setup tới platform sensor
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
     entry.async_on_unload(entry.add_update_listener(update_listener))
     
     return True
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry):
-    """Reload khi thay đổi tùy chọn."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload integration."""
     return await hass.config_entries.async_unload_platforms(entry, ["sensor"])
