@@ -1,6 +1,6 @@
 add_order:
   name: "Thêm đơn hàng mới"
-  description: "Ghi nhận mua sắm vào cơ sở dữ liệu. Các trường có dấu * là bắt buộc."
+  description: "Ghi nhận mua sắm. Dữ liệu sẽ được lưu an toàn tại /config/shopping_history/"
   fields:
     entry_id:
       name: "Entry ID *"
@@ -28,7 +28,7 @@ add_order:
         text:
     price:
       name: "Đơn giá (VNĐ) *"
-      description: "Giá trị đơn hàng (chưa hoặc đã gồm thuế tùy cách nhập)."
+      description: "Giá trị đơn hàng."
       required: true
       selector:
         number:
@@ -43,10 +43,10 @@ add_order:
         number:
           min: 0.1
           mode: box
-          step: 0.1
+          step: 1
     vat:
       name: "Thuế VAT (%)"
-      description: "Nhập 0 nếu không có thuế hoặc giá đã bao gồm thuế."
+      description: "Nhập 0 nếu giá đã bao gồm thuế hoặc không có thuế."
       required: false
       default: 0
       selector:
