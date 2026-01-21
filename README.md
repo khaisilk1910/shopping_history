@@ -5,6 +5,7 @@ Integration dành cho Home Assistant giúp theo dõi chi tiêu, quản lý bảo
 ## Cài đặt
 
 1. Nhấn nút bên dưới để thêm vào HACS trên Home Assistant.
+
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=khaisilk1910&repository=shopping_history&category=integration)
 
   - Sau khi thêm trong HACS và khởi động lại Home Assistant
