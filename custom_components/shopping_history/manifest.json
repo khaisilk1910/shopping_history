@@ -1,0 +1,11 @@
+{
+  "domain": "shopping_history",
+  "name": "Lịch Sử Mua Hàng",
+  "version": "1.0.1",
+  "documentation": "https://github.com/khaisilk1910/shopping_history",
+  "dependencies": [],
+  "codeowners": ["@khaisilk1910"],
+  "iot_class": "local_polling",
+  "config_flow": true,
+  "requirements": []
+}
