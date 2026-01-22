@@ -98,6 +98,7 @@ class ShoppingBase(SensorEntity):
         self.async_schedule_update_ha_state(True)
 
 class ShoppingGrandTotalSensor(ShoppingBase):
+    """Sensor tổng hợp toàn bộ lịch sử (Chỉ lấy thông tin từ bảng grand_total)."""
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "đ"
@@ -111,18 +112,28 @@ class ShoppingGrandTotalSensor(ShoppingBase):
         if not os.path.exists(self._db_path): return
         try:
             conn = sqlite3.connect(self._db_path)
+            conn.row_factory = sqlite3.Row  # Để truy cập theo tên cột
             cursor = conn.cursor()
+            # Chỉ lấy các cột có trong bảng grand_total
             cursor.execute("SELECT tong_so_lan_mua, tong_so_luong_hang, tong_tien_sau_vat FROM grand_total WHERE id=1")
             row = cursor.fetchone()
             conn.close()
+            
             if row:
-                self._attr_native_value = int(row[2])
-                self._attr_extra_state_attributes = {"tong_so_don_hang": row[0], "tong_so_luong_san_pham": row[1]}
+                self._attr_native_value = int(row["tong_tien_sau_vat"])
+                self._attr_extra_state_attributes = {
+                    "tong_so_don_hang": row["tong_so_lan_mua"],
+                    "tong_so_luong_san_pham": row["tong_so_luong_hang"],
+                    "tong_tien": row["tong_tien_sau_vat"]
+                }
             else:
                 self._attr_native_value = 0
-        except: self._attr_native_value = 0
+                self._attr_extra_state_attributes = {}
+        except: 
+            self._attr_native_value = 0
 
 class ShoppingYearlySensor(ShoppingBase):
+    """Sensor thống kê theo năm (Chỉ lấy thông tin từ bảng yearly_stats)."""
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "đ"
@@ -139,23 +150,27 @@ class ShoppingYearlySensor(ShoppingBase):
             conn = sqlite3.connect(self._db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+            # Chỉ lấy dữ liệu thống kê, KHÔNG lấy danh sách đơn hàng
             cursor.execute("SELECT tong_don_hang, tong_so_luong, tong_tien_sau_vat FROM yearly_stats WHERE nam=?", (self._year,))
             row = cursor.fetchone()
-            cursor.execute("SELECT ngay, thang, ten_hang, noi_mua, thanh_tien_sau_vat, nganh_hang FROM purchases WHERE nam=? ORDER BY thang DESC, ngay DESC", (self._year,))
-            items = cursor.fetchall()
             conn.close()
+
             if row:
                 self._attr_native_value = int(row["tong_tien_sau_vat"])
                 self._attr_extra_state_attributes = {
                     "nam": self._year,
                     "tong_don_hang": row["tong_don_hang"],
                     "tong_so_luong": row["tong_so_luong"],
-                    "danh_sach_san_pham": [{"ngay": f"{i['ngay']}/{i['thang']}", "ten": i["ten_hang"], "noi_mua": i["noi_mua"] or "", "gia": f"{int(i['thanh_tien_sau_vat']):,} đ", "loai": i["nganh_hang"]} for i in items]
+                    "tong_tien": row["tong_tien_sau_vat"]
                 }
-            else: self._attr_native_value = 0
-        except: self._attr_native_value = 0
+            else: 
+                self._attr_native_value = 0
+                self._attr_extra_state_attributes = {}
+        except: 
+            self._attr_native_value = 0
 
 class ShoppingMonthlySensor(ShoppingBase):
+    """Sensor thống kê theo tháng (Chứa TOÀN BỘ thông tin chi tiết đơn hàng)."""
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "đ"
@@ -173,22 +188,40 @@ class ShoppingMonthlySensor(ShoppingBase):
             conn = sqlite3.connect(self._db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+            
+            # 1. Lấy thống kê tổng quan của tháng
             cursor.execute("SELECT tong_tien_sau_vat, tong_don_hang, tong_so_luong FROM monthly_stats WHERE nam=? AND thang=?", (self._year, self._month))
             stat = cursor.fetchone()
-            cursor.execute("SELECT ngay, ten_hang, noi_mua, so_luong, don_gia, thanh_tien_sau_vat, ngay_het_bh, nganh_hang, thoi_gian_bh_thang FROM purchases WHERE nam=? AND thang=? ORDER BY ngay DESC", (self._year, self._month))
+            
+            # 2. Lấy TOÀN BỘ thông tin chi tiết các đơn hàng trong tháng (SELECT *)
+            cursor.execute("SELECT * FROM purchases WHERE nam=? AND thang=? ORDER BY ngay DESC", (self._year, self._month))
             items = cursor.fetchall()
             conn.close()
+
             if stat:
                 self._attr_native_value = int(stat["tong_tien_sau_vat"])
+                
+                # Chuyển đổi từng dòng sqlite3.Row thành dictionary đầy đủ
+                details_list = []
+                for item in items:
+                    # dict(item) sẽ lấy tất cả các cột: id, ngay_mua, ten_hang, ... ngay_het_bh, v.v.
+                    item_dict = dict(item)
+                    details_list.append(item_dict)
+
                 self._attr_extra_state_attributes = {
                     "tong_don_hang": stat["tong_don_hang"],
                     "tong_so_luong": stat["tong_so_luong"],
-                    "danh_sach_chi_tiet": [{"ngay": f"{i['ngay']}/{self._month}", "ten": i["ten_hang"], "noi_mua": i["noi_mua"] or "", "gia_goc": f"{int(i['don_gia']):,} đ", "sl": i["so_luong"], "tong_tien": f"{int(i['thanh_tien_sau_vat']):,} đ", "bao_hanh": f"{i['thoi_gian_bh_thang']} tháng", "het_han_bh": i["ngay_het_bh"] or "Không", "loai": i["nganh_hang"]} for i in items]
+                    "tong_tien": stat["tong_tien_sau_vat"],
+                    "danh_sach_chi_tiet": details_list  # Chứa tất cả cột trong bảng purchases
                 }
-            else: self._attr_native_value = 0
-        except: self._attr_native_value = 0
+            else: 
+                self._attr_native_value = 0
+                self._attr_extra_state_attributes = {}
+        except: 
+            self._attr_native_value = 0
 
 class ShoppingCategorySensor(ShoppingBase):
+    """Sensor thống kê theo ngành hàng (Chỉ lấy thông tin từ bảng category_stats)."""
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "đ"
@@ -203,12 +236,22 @@ class ShoppingCategorySensor(ShoppingBase):
         if not os.path.exists(self._db_path): return
         try:
             conn = sqlite3.connect(self._db_path)
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+            # Chỉ lấy các cột có trong bảng category_stats
             cursor.execute("SELECT tong_so_luong, tong_tien_sau_vat FROM category_stats WHERE nganh_hang=?", (self._category,))
             row = cursor.fetchone()
             conn.close()
+            
             if row:
-                self._attr_native_value = int(row[1])
-                self._attr_extra_state_attributes = {"nganh_hang": self._category, "tong_so_luong_da_mua": row[0]}
-            else: self._attr_native_value = 0
-        except: self._attr_native_value = 0
+                self._attr_native_value = int(row["tong_tien_sau_vat"])
+                self._attr_extra_state_attributes = {
+                    "nganh_hang": self._category,
+                    "tong_so_luong": row["tong_so_luong"],
+                    "tong_tien": row["tong_tien_sau_vat"]
+                }
+            else: 
+                self._attr_native_value = 0
+                self._attr_extra_state_attributes = {}
+        except: 
+            self._attr_native_value = 0
