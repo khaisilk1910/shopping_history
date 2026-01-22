@@ -24,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     known_years = set()
     known_months = set()      
     known_categories = set()
+    known_places = set() # Tập hợp theo dõi Nơi mua
 
     # Luôn tạo Sensor Tổng
     async_add_entities([ShoppingGrandTotalSensor(db_path, f"{friendly_name} Tổng Cộng", entry.entry_id)])
@@ -35,32 +36,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         def get_all_keys():
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
+            
+            # Lấy danh sách Năm, Tháng, Ngành hàng từ các bảng stats
             cursor.execute("SELECT DISTINCT nam FROM yearly_stats")
             db_years = {r[0] for r in cursor.fetchall()}
+            
             cursor.execute("SELECT nam, thang FROM monthly_stats")
             db_months = {(r[0], r[1]) for r in cursor.fetchall()}
+            
             cursor.execute("SELECT DISTINCT nganh_hang FROM category_stats")
             db_cats = {r[0] for r in cursor.fetchall()}
-            conn.close()
-            return db_years, db_months, db_cats
 
-        db_years, db_months, db_cats = await hass.async_add_executor_job(get_all_keys)
+            # Lấy danh sách Nơi mua trực tiếp từ bảng purchases (vì chưa có bảng stats riêng)
+            cursor.execute("SELECT DISTINCT noi_mua FROM purchases WHERE noi_mua IS NOT NULL AND noi_mua != ''")
+            db_places = {r[0] for r in cursor.fetchall()}
+
+            conn.close()
+            return db_years, db_months, db_cats, db_places
+
+        db_years, db_months, db_cats, db_places = await hass.async_add_executor_job(get_all_keys)
         new_entities = []
 
+        # 1. Tạo sensor Năm
         for year in db_years:
             if year not in known_years:
                 new_entities.append(ShoppingYearlySensor(db_path, f"{friendly_name} Năm {year}", year, entry.entry_id))
                 known_years.add(year)
         
+        # 2. Tạo sensor Tháng
         for y, m in db_months:
             if (y, m) not in known_months:
                 new_entities.append(ShoppingMonthlySensor(db_path, f"{friendly_name} Tháng {m}/{y}", y, m, entry.entry_id))
                 known_months.add((y, m))
 
+        # 3. Tạo sensor Ngành hàng
         for cat in db_cats:
             if cat not in known_categories:
                 new_entities.append(ShoppingCategorySensor(db_path, f"{friendly_name} - {cat}", cat, entry.entry_id))
                 known_categories.add(cat)
+
+        # 4. Tạo sensor Nơi mua (MỚI)
+        for place in db_places:
+            if place not in known_places:
+                new_entities.append(ShoppingPlaceSensor(db_path, f"{friendly_name} - {place}", place, entry.entry_id))
+                known_places.add(place)
 
         if new_entities:
             async_add_entities(new_entities)
@@ -96,6 +115,15 @@ class ShoppingBase(SensorEntity):
     @callback
     def _force_update_callback(self, *args):
         self.async_schedule_update_ha_state(True)
+
+    def _process_details(self, items):
+        """Hàm hỗ trợ: Chuyển đổi item sang dict và XÓA ID."""
+        results = []
+        for item in items:
+            d = dict(item)
+            d.pop("id", None)  # Xóa ID để ngày mua lên đầu
+            results.append(d)
+        return results
 
 class ShoppingGrandTotalSensor(ShoppingBase):
     """Sensor tổng hợp toàn bộ lịch sử."""
@@ -191,7 +219,7 @@ class ShoppingMonthlySensor(ShoppingBase):
             cursor.execute("SELECT tong_tien_sau_vat, tong_don_hang, tong_so_luong FROM monthly_stats WHERE nam=? AND thang=?", (self._year, self._month))
             stat = cursor.fetchone()
             
-            # 2. Chi tiết: Sắp xếp theo NGÀY MUA (ngay_mua) thay vì ID
+            # 2. Chi tiết: Sắp xếp theo NGÀY MUA
             cursor.execute("SELECT * FROM purchases WHERE nam=? AND thang=? ORDER BY ngay_mua DESC", (self._year, self._month))
             items = cursor.fetchall()
             conn.close()
@@ -199,8 +227,8 @@ class ShoppingMonthlySensor(ShoppingBase):
             if stat:
                 self._attr_native_value = int(stat["tong_tien_sau_vat"])
                 
-                # Chuyển đổi sang list dict đầy đủ
-                details_list = [dict(item) for item in items]
+                # Xử lý: Bỏ ID
+                details_list = self._process_details(items)
 
                 self._attr_extra_state_attributes = {
                     "tong_don_hang": stat["tong_don_hang"],
@@ -237,7 +265,7 @@ class ShoppingCategorySensor(ShoppingBase):
             cursor.execute("SELECT tong_so_luong, tong_tien_sau_vat FROM category_stats WHERE nganh_hang=?", (self._category,))
             stat = cursor.fetchone()
 
-            # 2. Chi tiết ngành hàng: Lấy tất cả thông tin từ bảng purchases
+            # 2. Chi tiết ngành hàng
             cursor.execute("SELECT * FROM purchases WHERE nganh_hang=? ORDER BY ngay_mua DESC", (self._category,))
             items = cursor.fetchall()
 
@@ -246,13 +274,62 @@ class ShoppingCategorySensor(ShoppingBase):
             if stat:
                 self._attr_native_value = int(stat["tong_tien_sau_vat"])
                 
-                # Chuyển đổi sang list dict đầy đủ
-                details_list = [dict(item) for item in items]
+                # Xử lý: Bỏ ID
+                details_list = self._process_details(items)
 
                 self._attr_extra_state_attributes = {
                     "nganh_hang": self._category,
                     "tong_so_luong": stat["tong_so_luong"],
                     "tong_tien": stat["tong_tien_sau_vat"],
+                    "danh_sach_chi_tiet": details_list
+                }
+            else: 
+                self._attr_native_value = 0
+                self._attr_extra_state_attributes = {}
+        except: 
+            self._attr_native_value = 0
+
+class ShoppingPlaceSensor(ShoppingBase):
+    """Sensor thống kê theo Nơi mua (Shopee, Tiki, etc.)."""
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "đ"
+    _attr_icon = "mdi:store-marker" # Icon phù hợp cho nơi mua
+
+    def __init__(self, db_path, name, place, entry_id):
+        super().__init__(db_path, name, entry_id)
+        self._place = place
+        self._attr_unique_id = f"{entry_id}_place_{place}"
+
+    def update(self):
+        if not os.path.exists(self._db_path): return
+        try:
+            conn = sqlite3.connect(self._db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 1. Tính toán thống kê on-the-fly từ bảng purchases
+            cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE noi_mua=?", (self._place,))
+            stat = cursor.fetchone()
+
+            # 2. Chi tiết nơi mua
+            cursor.execute("SELECT * FROM purchases WHERE noi_mua=? ORDER BY ngay_mua DESC", (self._place,))
+            items = cursor.fetchall()
+
+            conn.close()
+            
+            if stat and stat[0] > 0: # Kiểm tra có dữ liệu
+                total_money = stat[2] if stat[2] is not None else 0
+                self._attr_native_value = int(total_money)
+                
+                # Xử lý: Bỏ ID
+                details_list = self._process_details(items)
+
+                self._attr_extra_state_attributes = {
+                    "noi_mua": self._place,
+                    "tong_don_hang": stat[0],
+                    "tong_so_luong": stat[1] if stat[1] is not None else 0,
+                    "tong_tien": total_money,
                     "danh_sach_chi_tiet": details_list
                 }
             else: 
