@@ -93,3 +93,23 @@ add_order:
       required: false
       selector:
         date:
+
+delete_order:
+  name: "Xóa đơn hàng"
+  description: "Xóa đơn hàng khỏi cơ sở dữ liệu và tính toán lại thống kê."
+  fields:
+    entry_id:
+      name: "Chọn bộ Lịch sử mua sắm *"
+      description: "Chọn tài khoản chứa đơn hàng cần xóa."
+      required: true
+      selector:
+        config_entry:
+          integration: shopping_history
+    order_id:
+      name: "ID đơn hàng *"
+      description: "Nhập ID của đơn hàng (xem trong chi tiết sensor)."
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
