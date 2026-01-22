@@ -43,7 +43,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not os.path.exists(storage_dir):
         await hass.async_add_executor_job(os.makedirs, storage_dir)
 
-    db_path = os.path.join(storage_dir, f"shopping_data.db")
+    # --- SỬA ĐỔI: TẠO TÊN FILE RIÊNG BIỆT THEO ENTRY_ID ---
+    # File sẽ có dạng: shopping_data_01J4....db
+    db_path = os.path.join(storage_dir, f"shopping_data_{entry.entry_id}.db")
     
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {"db_path": db_path}
@@ -123,8 +125,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # --- SERVICE XỬ LÝ NHẬP LIỆU ---
     async def handle_add_order(call: ServiceCall):
         entry_id_call = call.data.get("entry_id")
+        
+        # Chỉ xử lý nếu entry_id khớp với instance này
         if entry_id_call != entry.entry_id:
-             _LOGGER.debug(f"Service called with entry_id {entry_id_call}, expected {entry.entry_id}")
+             return 
 
         data = call.data
         
