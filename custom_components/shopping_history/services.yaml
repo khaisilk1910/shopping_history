@@ -8,9 +8,7 @@ add_order:
       required: true
       selector:
         config_entry:
-          # QUAN TRỌNG: Phải dùng dấu gạch ngang (-) để khai báo danh sách
-          integration: 
-            - shopping_history
+          integration: shopping_history
     name:
       name: "Tên hàng hóa *"
       description: "Ví dụ: iPhone 15 Pro Max"
