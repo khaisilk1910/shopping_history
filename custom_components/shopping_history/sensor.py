@@ -71,17 +71,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 new_entities.append(ShoppingMonthlySensor(db_path, f"{friendly_name} Tháng {m}/{y}", y, m, entry.entry_id))
                 known_months.add((y, m))
 
-        # 3. Tạo sensor Ngành hàng THEO NĂM (Đã bỏ dấu "-")
+        # 3. Tạo sensor Ngành hàng THEO NĂM
         for y, cat in db_year_cats:
             if (y, cat) not in known_year_cats:
-                # Tên mới: Tên Gốc + Ngành Hàng + Năm (Ví dụ: Lịch Sử Mua Sắm Điện tử 2026)
                 new_entities.append(ShoppingCategorySensor(db_path, f"{friendly_name} {cat} {y}", cat, y, entry.entry_id))
                 known_year_cats.add((y, cat))
 
-        # 4. Tạo sensor Nơi mua THEO NĂM (Đã bỏ dấu "-")
+        # 4. Tạo sensor Nơi mua THEO NĂM
         for y, place in db_year_places:
             if (y, place) not in known_year_places:
-                # Tên mới: Tên Gốc + Nơi Mua + Năm (Ví dụ: Lịch Sử Mua Sắm Shopee 2026)
                 new_entities.append(ShoppingPlaceSensor(db_path, f"{friendly_name} {place} {y}", place, y, entry.entry_id))
                 known_year_places.add((y, place))
 
@@ -121,11 +119,12 @@ class ShoppingBase(SensorEntity):
         self.async_schedule_update_ha_state(True)
 
     def _process_details(self, items):
-        """Hàm hỗ trợ: Chuyển đổi item sang dict và XÓA ID."""
+        """Hàm hỗ trợ: Chuyển đổi item sang dict."""
         results = []
         for item in items:
             d = dict(item)
-            d.pop("id", None)  # Xóa ID
+            # --- UPDATE: GIỮ LẠI ID ĐỂ HIỂN THỊ ---
+            # d.pop("id", None) 
             results.append(d)
         return results
 
