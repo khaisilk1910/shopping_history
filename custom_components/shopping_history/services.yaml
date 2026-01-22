@@ -3,12 +3,14 @@ add_order:
   description: "Ghi nhận mua sắm. Dữ liệu sẽ được lưu an toàn tại /config/shopping_history/"
   fields:
     entry_id:
-      name: "Entry ID *"
-      description: "ID của Integration (Vào Settings > Integrations > Shopping History > 3 chấm > Copy Entry ID)."
+      name: "Chọn bộ Lịch sử mua sắm *"
+      description: "Chọn tài khoản/bộ hồ sơ lưu trữ muốn thêm đơn hàng vào."
       required: true
       selector:
         config_entry:
-          integration: shopping_history
+          # QUAN TRỌNG: Phải dùng dấu gạch ngang (-) để khai báo danh sách
+          integration: 
+            - shopping_history
     name:
       name: "Tên hàng hóa *"
       description: "Ví dụ: iPhone 15 Pro Max"
