@@ -2,7 +2,8 @@
 
 Integration dành cho Home Assistant giúp theo dõi chi tiêu, quản lý bảo hành và thống kê tài chính cá nhân.
 
-<img width="1319" height="786" alt="image" src="https://github.com/user-attachments/assets/3f7b229b-46fd-4416-9dd0-a364313624f8" />
+<img width="1815" height="788" alt="image" src="https://github.com/user-attachments/assets/872a4ff5-fdde-4c33-b6c6-8846967f5638" />
+
 
 
 ## Cài đặt
