@@ -17,11 +17,11 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the sensor platform."""
+    # Lấy đúng đường dẫn DB theo entry_id
     db_path = hass.data[DOMAIN][entry.entry_id]["db_path"]
     friendly_name = entry.data.get("friendly_name", "Shopping History")
     
     # Các tập hợp để theo dõi những gì đã được tạo sensor
-    # Lưu ý: Category và Place giờ sẽ kèm theo Năm -> (year, value)
     known_years = set()
     known_months = set()      
     known_year_cats = set()   # (year, category)
@@ -45,11 +45,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             cursor.execute("SELECT nam, thang FROM monthly_stats")
             db_months = {(r[0], r[1]) for r in cursor.fetchall()}
             
-            # 2. Lấy danh sách (Năm, Ngành hàng) có dữ liệu trong bảng purchases
+            # 2. Lấy danh sách (Năm, Ngành hàng)
             cursor.execute("SELECT DISTINCT nam, nganh_hang FROM purchases WHERE nganh_hang IS NOT NULL AND nganh_hang != ''")
             db_year_cats = {(r[0], r[1]) for r in cursor.fetchall()}
 
-            # 3. Lấy danh sách (Năm, Nơi mua) có dữ liệu trong bảng purchases
+            # 3. Lấy danh sách (Năm, Nơi mua)
             cursor.execute("SELECT DISTINCT nam, noi_mua FROM purchases WHERE noi_mua IS NOT NULL AND noi_mua != ''")
             db_year_places = {(r[0], r[1]) for r in cursor.fetchall()}
 
@@ -71,18 +71,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 new_entities.append(ShoppingMonthlySensor(db_path, f"{friendly_name} Tháng {m}/{y}", y, m, entry.entry_id))
                 known_months.add((y, m))
 
-        # 3. Tạo sensor Ngành hàng THEO NĂM
+        # 3. Tạo sensor Ngành hàng THEO NĂM (Đã bỏ dấu "-")
         for y, cat in db_year_cats:
             if (y, cat) not in known_year_cats:
-                # Tên: Lịch Sử Mua Sắm - Điện tử 2026
-                new_entities.append(ShoppingCategorySensor(db_path, f"{friendly_name} - {cat} {y}", cat, y, entry.entry_id))
+                # Tên mới: Tên Gốc + Ngành Hàng + Năm (Ví dụ: Lịch Sử Mua Sắm Điện tử 2026)
+                new_entities.append(ShoppingCategorySensor(db_path, f"{friendly_name} {cat} {y}", cat, y, entry.entry_id))
                 known_year_cats.add((y, cat))
 
-        # 4. Tạo sensor Nơi mua THEO NĂM
+        # 4. Tạo sensor Nơi mua THEO NĂM (Đã bỏ dấu "-")
         for y, place in db_year_places:
             if (y, place) not in known_year_places:
-                # Tên: Lịch Sử Mua Sắm - Shopee 2026
-                new_entities.append(ShoppingPlaceSensor(db_path, f"{friendly_name} - {place} {y}", place, y, entry.entry_id))
+                # Tên mới: Tên Gốc + Nơi Mua + Năm (Ví dụ: Lịch Sử Mua Sắm Shopee 2026)
+                new_entities.append(ShoppingPlaceSensor(db_path, f"{friendly_name} {place} {y}", place, y, entry.entry_id))
                 known_year_places.add((y, place))
 
         if new_entities:
@@ -125,7 +125,7 @@ class ShoppingBase(SensorEntity):
         results = []
         for item in items:
             d = dict(item)
-            d.pop("id", None)  # Xóa ID để ngày mua lên đầu
+            d.pop("id", None)  # Xóa ID
             results.append(d)
         return results
 
