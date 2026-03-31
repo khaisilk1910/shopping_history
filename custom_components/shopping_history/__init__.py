@@ -12,9 +12,18 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
+# --- THÊM CÁC IMPORT CHO GIAO DIỆN UI LÊN LOVELACE ---
+from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.lovelace.resources import ResourceStorageCollection
+
 from .const import DOMAIN, CONF_FRIENDLY_NAME, SIGNAL_UPDATE_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
+
+# Khai báo đường dẫn ảo trên web và thư mục thực tế chứa UI thẻ Card
+UI_URL_BASE = "/shopping_history_ui"
+UI_DIR_PATH = "frontend"
 
 # --- VALIDATE DỮ LIỆU ĐẦU VÀO ---
 SERVICE_ADD_ORDER_SCHEMA = vol.Schema({
@@ -37,8 +46,69 @@ SERVICE_DELETE_ORDER_SCHEMA = vol.Schema({
     vol.Required("order_id"): vol.Coerce(int),
 })
 
+# =========================================================
+# HÀM TỰ ĐỘNG THÊM THẺ VÀO LOVELACE RESOURCES
+# =========================================================
+async def init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
+    """Hàm tự động thêm thẻ vào Lovelace Resources với định dạng hacstag."""
+    url_with_version = f"{url}?hacstag={ver}"
+
+    if "lovelace" not in hass.data:
+        _LOGGER.debug("Lovelace chưa được tải, sử dụng add_extra_js_url fallback.")
+        add_extra_js_url(hass, url_with_version)
+        return False
+
+    lovelace = hass.data.get("lovelace")
+    resources: ResourceStorageCollection = (
+        lovelace.resources if hasattr(lovelace, "resources") else lovelace.get("resources")
+    )
+
+    if not resources:
+        return False
+
+    if hasattr(resources, "async_get_info"):
+        await resources.async_get_info()
+
+    for item in resources.async_items():
+        item_url = item.get("url", "")
+        
+        # LOGIC SO SÁNH CHÍNH XÁC: Phải khớp hoàn toàn hoặc chỉ khác tham số phía sau ?
+        if item_url == url or item_url.startswith(f"{url}?"):
+            if item_url.endswith(f"hacstag={ver}"):
+                return False # Đã đúng phiên bản, không làm gì cả
+
+            _LOGGER.debug(f"Cập nhật Lovelace resource thành: {url_with_version}")
+
+            if isinstance(resources, ResourceStorageCollection):
+                await resources.async_update_item(
+                    item["id"], {"res_type": "module", "url": url_with_version}
+                )
+            else:
+                item["url"] = url_with_version
+
+            return True
+
+    if isinstance(resources, ResourceStorageCollection):
+        _LOGGER.debug(f"Thêm mới Lovelace resource: {url_with_version}")
+        await resources.async_create_item({"res_type": "module", "url": url_with_version})
+    else:
+        _LOGGER.debug(f"Thêm extra JS module (chế độ YAML): {url_with_version}")
+        add_extra_js_url(hass, url_with_version)
+
+    return True
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Thiết lập Global cho Integration (Chứa Service xử lý chung)."""
+    
+    # --- ĐĂNG KÝ WEB URL TĨNH CHO UI CARD ---
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(
+            UI_URL_BASE,
+            hass.config.path("custom_components", DOMAIN, UI_DIR_PATH),
+            False
+        )
+    ])
     
     # ------------------------------------------------------------------
     # 1. SERVICE: THÊM ĐƠN HÀNG (ADD ORDER)
@@ -202,6 +272,27 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Thiết lập cho từng 'bộ' (Instance) Lịch sử mua sắm."""
     
+    # ---------------------------------------------------------
+    # AUTO CACHE BUSTING KẾT HỢP MANIFEST FALLBACK (Dành cho thẻ UI)
+    # ---------------------------------------------------------
+    integration = hass.data.get("integrations", {}).get(DOMAIN)
+    fallback_version = getattr(integration, "version", "1.0")
+    
+    def get_file_version(file_name, fallback):
+        try:
+            file_path = hass.config.path("custom_components", DOMAIN, UI_DIR_PATH, file_name)
+            return str(int(os.path.getmtime(file_path)))
+        except Exception as e:
+            _LOGGER.warning(f"Không thể đọc file {file_name} để tạo hacstag ({e}). Dùng version dự phòng: {fallback}")
+            return fallback
+
+    ver_card = await hass.async_add_executor_job(
+        get_file_version, "shopping-history-card.js", fallback_version
+    )
+
+    await init_resource(hass, f"{UI_URL_BASE}/shopping-history-card.js", ver_card)
+    # ---------------------------------------------------------
+
     # --- CẤU HÌNH ĐƯỜNG DẪN AN TOÀN ---
     storage_dir = hass.config.path("shopping_history")
     
