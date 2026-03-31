@@ -399,7 +399,6 @@
       this._baseSlugs = [];
       this._currentBaseSlug = null;
       this._availableYears = [];
-      this._availableMonths = [];
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
     }
@@ -414,14 +413,16 @@
     set hass(hass) {
       const oldHass = this._hass;
       this._hass = hass;
+      
       if (!oldHass) {
         this.scanSensors();
         this.updateData();
       } else {
         let shouldUpdate = false;
-        const relevantSensors = Object.keys(hass.states).filter(k => k.startsWith('sensor.') && k.includes('_thang_'));
+        // Chỉ quét các sensor có chứa '_year_' theo cấu trúc backend mới
+        const relevantSensors = Object.keys(hass.states).filter(k => k.startsWith('sensor.') && k.includes('_year_'));
         for (let eid of relevantSensors) {
-            if (!oldHass.states[eid] || oldHass.states[eid].state !== hass.states[eid].state || oldHass.states[eid].attributes.tong_don_hang !== hass.states[eid].attributes.tong_don_hang) {
+            if (oldHass.states[eid] !== hass.states[eid]) {
                 shouldUpdate = true;
                 break;
             }
@@ -436,18 +437,19 @@
     scanSensors() {
       if (!this._hass) return;
       
-      const monthSensors = Object.keys(this._hass.states).filter(eid => 
-        eid.startsWith('sensor.') && eid.includes('_thang_') && this._hass.states[eid].attributes.danh_sach_chi_tiet
+      const yearSensors = Object.keys(this._hass.states).filter(eid => 
+        eid.startsWith('sensor.') && eid.includes('_year_') && this._hass.states[eid].attributes.danh_sach_chi_tiet
       );
 
       const bases = new Set();
       const years = new Set();
 
-      monthSensors.forEach(eid => {
-        const match = eid.match(/^sensor\.(.+)_thang_(\d+)_(\d+)$/);
+      yearSensors.forEach(eid => {
+        // Tìm các sensor theo chuẩn mới: sensor.[base_slug]_year_[year]
+        const match = eid.match(/^sensor\.(.+)_year_(\d{4})$/);
         if (match) {
             bases.add(match[1]);
-            years.add(parseInt(match[3]));
+            years.add(parseInt(match[2]));
         }
       });
 
@@ -468,42 +470,24 @@
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
 
-      const monthSensorsInYear = Object.keys(this._hass.states).filter(eid => 
-          eid.startsWith(`sensor.${this._currentBaseSlug}_thang_`) && eid.endsWith(`_${this._selectedYear}`)
-      );
+      // Backend giờ chỉ cung cấp 1 sensor duy nhất chứa toàn bộ dữ liệu của năm
+      const yearEid = `sensor.${this._currentBaseSlug}_year_${this._selectedYear}`;
+      const yearState = this._hass.states[yearEid];
       
-      this._availableMonths = monthSensorsInYear.map(eid => {
-          const match = eid.match(/_thang_(\d+)_/);
-          return match ? parseInt(match[1]) : 0;
-      }).filter(m => m > 0).sort((a, b) => b - a);
-
-      if (this._selectedMonth !== 'all' && !this._availableMonths.includes(this._selectedMonth) && this._availableMonths.length > 0) {
-          this._selectedMonth = this._availableMonths[0];
-      }
-
-      if (this._selectedMonth === 'all') {
-          const yearEid = `sensor.${this._currentBaseSlug}_year_${this._selectedYear}`;
-          const yearState = this._hass.states[yearEid];
-          if (yearState && yearState.attributes) {
-              this._stats.orders = yearState.attributes.tong_don_hang || 0;
-              this._stats.items = yearState.attributes.tong_so_luong || 0;
-              this._stats.total = yearState.attributes.tong_tien || 0;
-          }
-
-          monthSensorsInYear.forEach(eid => {
-              const state = this._hass.states[eid];
-              if (state && state.attributes.danh_sach_chi_tiet) {
-                  this._items = this._items.concat(state.attributes.danh_sach_chi_tiet);
-              }
-          });
-      } else {
-          const monthEid = `sensor.${this._currentBaseSlug}_thang_${this._selectedMonth}_${this._selectedYear}`;
-          const monthState = this._hass.states[monthEid];
-          if (monthState && monthState.attributes) {
-              this._stats.orders = monthState.attributes.tong_don_hang || 0;
-              this._stats.items = monthState.attributes.tong_so_luong || 0;
-              this._stats.total = monthState.attributes.tong_tien || 0;
-              this._items = monthState.attributes.danh_sach_chi_tiet || [];
+      if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
+          const allItems = yearState.attributes.danh_sach_chi_tiet;
+          
+          if (this._selectedMonth === 'all') {
+              this._items = [...allItems];
+              this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
+              this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
+              this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+          } else {
+              // Lọc thủ công dữ liệu tháng tại frontend để giao diện siêu mượt
+              this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
+              this._stats.orders = this._items.length;
+              this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
+              this._stats.total = this._items.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
           }
       }
 
