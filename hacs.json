@@ -1,10 +1,7 @@
 {
   "name": "Lịch Sử Mua Hàng",
-  "content_in_root": false,
-  "zip_release": true,
-  "render_readme": true,
-  "filename": "shopping_history.zip",
+  "content_type": "integration",
   "homeassistant": "2024.1.0",
-  "country": ["VN"],
-  "iot_class": "local_polling"
+  "render_readme": true,
+  "country": ["VN"]
 }
