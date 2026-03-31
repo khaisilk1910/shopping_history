@@ -325,7 +325,6 @@
             ...this._config,
             title: this.querySelector('#title-input').value,
             icon: this.querySelector('#icon-input').value,
-
             bg_type: this.querySelector('#bg_type').value,
             bg_color: this.querySelector('#bg_color').value,
             bg_opacity: parseInt(this.querySelector('#bg_opacity').value, 10),
@@ -333,49 +332,35 @@
             bg_gradient_color1: this.querySelector('#bg_gradient_color1').value,
             bg_gradient_color2: this.querySelector('#bg_gradient_color2').value,
             bg_gradient_angle: parseInt(this.querySelector('#bg_gradient_angle').value, 10),
-
             border_enable: this.querySelector('#border_enable').checked,
             border_color: this.querySelector('#border_color').value,
             border_width: parseInt(this.querySelector('#border_width').value, 10),
             border_opacity: parseInt(this.querySelector('#border_opacity').value, 10),
-            
             shadow_enable: this.querySelector('#shadow_enable').checked,
             shadow_color: this.querySelector('#shadow_color').value,
             shadow_opacity: parseInt(this.querySelector('#shadow_opacity').value, 10),
             shadow_blur: parseInt(this.querySelector('#shadow_blur').value, 10),
             shadow_offset_x: parseInt(this.querySelector('#shadow_offset_x').value, 10),
             shadow_offset_y: parseInt(this.querySelector('#shadow_offset_y').value, 10),
-
             auto_contrast: this.querySelector('#auto_contrast').checked,
             textColor: this.querySelector('#textColor').value,
             accentColor: this.querySelector('#accentColor').value,
             moneyColor: this.querySelector('#moneyColor').value,
             blockBg: this.querySelector('#blockBg').value
         };
-        
         const event = new CustomEvent("config-changed", { detail: { config: newConfig }, bubbles: true, composed: true });
         this.dispatchEvent(event);
       };
 
       this.querySelectorAll('.config-trigger').forEach(el => {
-        if (el.tagName === 'SELECT') {
-            el.addEventListener('change', dispatchUpdate);
-        } else {
-            el.addEventListener('input', dispatchUpdate);
-            el.addEventListener('change', dispatchUpdate); 
-        }
+        if (el.tagName === 'SELECT') { el.addEventListener('change', dispatchUpdate); } 
+        else { el.addEventListener('input', dispatchUpdate); el.addEventListener('change', dispatchUpdate); }
       });
 
       this.querySelectorAll('.section-title:not(.no-collapse)').forEach(titleEl => {
         const inputs = titleEl.querySelectorAll('input, select, button');
-        inputs.forEach(input => {
-          input.addEventListener('click', (e) => e.stopPropagation());
-        });
-
-        titleEl.addEventListener('click', () => {
-          const section = titleEl.closest('.section');
-          section.classList.toggle('collapsed');
-        });
+        inputs.forEach(input => input.addEventListener('click', (e) => e.stopPropagation()));
+        titleEl.addEventListener('click', () => titleEl.closest('.section').classList.toggle('collapsed'));
       });
     }
   }
@@ -401,6 +386,11 @@
       this._availableYears = [];
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
+      
+      // Khai báo quản lý tab và entry_id
+      this._activeTab = 'history'; 
+      this._entryIds = {}; 
+      this._uniqueCategories = new Set();
     }
 
     setConfig(config) {
@@ -419,7 +409,6 @@
         this.updateData();
       } else {
         let shouldUpdate = false;
-        // Chỉ quét các sensor có chứa '_year_' theo cấu trúc backend mới
         const relevantSensors = Object.keys(hass.states).filter(k => k.startsWith('sensor.') && k.includes('_year_'));
         for (let eid of relevantSensors) {
             if (oldHass.states[eid] !== hass.states[eid]) {
@@ -434,6 +423,30 @@
       }
     }
 
+    // Tự động tìm config_entry_id cho backend service
+    async fetchEntryId(entityId, baseSlug) {
+      if (this._entryIds[baseSlug]) return; // Đã lấy rồi
+      
+      // Cách 1: Thử lấy trực tiếp từ hass.entities (nếu có sẵn)
+      if (this._hass.entities && this._hass.entities[entityId]) {
+         this._entryIds[baseSlug] = this._hass.entities[entityId].config_entry_id;
+         return;
+      }
+      
+      // Cách 2: Gọi WebSocket API
+      try {
+        const result = await this._hass.callWS({
+          type: 'config/entity_registry/get',
+          entity_id: entityId
+        });
+        if (result && result.config_entry_id) {
+          this._entryIds[baseSlug] = result.config_entry_id;
+        }
+      } catch (err) {
+        console.warn("Shopping History: Không thể lấy config_entry_id cho", entityId);
+      }
+    }
+
     scanSensors() {
       if (!this._hass) return;
       
@@ -445,11 +458,12 @@
       const years = new Set();
 
       yearSensors.forEach(eid => {
-        // Tìm các sensor theo chuẩn mới: sensor.[base_slug]_year_[year]
         const match = eid.match(/^sensor\.(.+)_year_(\d{4})$/);
         if (match) {
             bases.add(match[1]);
             years.add(parseInt(match[2]));
+            // Lấy ID cấu hình ngầm dưới nền
+            this.fetchEntryId(eid, match[1]);
         }
       });
 
@@ -469,13 +483,16 @@
 
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
+      this._uniqueCategories.clear();
 
-      // Backend giờ chỉ cung cấp 1 sensor duy nhất chứa toàn bộ dữ liệu của năm
       const yearEid = `sensor.${this._currentBaseSlug}_year_${this._selectedYear}`;
       const yearState = this._hass.states[yearEid];
       
       if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
           const allItems = yearState.attributes.danh_sach_chi_tiet;
+          
+          // Trích xuất Ngành hàng cho gợi ý gõ nhanh
+          allItems.forEach(i => { if(i.nganh_hang) this._uniqueCategories.add(i.nganh_hang); });
           
           if (this._selectedMonth === 'all') {
               this._items = [...allItems];
@@ -483,7 +500,6 @@
               this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
               this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
           } else {
-              // Lọc thủ công dữ liệu tháng tại frontend để giao diện siêu mượt
               this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
               this._stats.orders = this._items.length;
               this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
@@ -499,18 +515,61 @@
       if (!this.card) {
         this.card = document.createElement('ha-card');
         this.shadowRoot.appendChild(this.card);
-        
-        this.card.addEventListener('change', (e) => {
-            if (e.target.id === 'year-select') {
-                this._selectedYear = parseInt(e.target.value);
-                this.updateData();
-            } else if (e.target.id === 'month-select') {
-                this._selectedMonth = e.target.value === 'all' ? 'all' : parseInt(e.target.value);
-                this.updateData();
-            }
+      }
+    }
+
+    // --- CÁC HÀM XỬ LÝ ACTIONS ---
+    switchTab(tabName) {
+      this._activeTab = tabName;
+      this.updateView();
+    }
+
+    handleDeleteOrder(orderId) {
+      const entryId = this._entryIds[this._currentBaseSlug];
+      if (!entryId) return alert("Hệ thống chưa tải xong ID kết nối. Vui lòng thử lại sau vài giây.");
+      
+      if (confirm(`Bạn có chắc chắn muốn xóa đơn hàng ID: ${orderId} không?`)) {
+        this._hass.callService('shopping_history', 'delete_order', {
+          entry_id: entryId,
+          order_id: orderId
+        }).then(() => {
+          // Toast thành công có thể thêm ở đây
+        }).catch(err => {
+          alert("Lỗi khi xóa: " + err.message);
         });
       }
     }
+
+    handleAddSubmit(e) {
+      e.preventDefault();
+      const entryId = this._entryIds[this._currentBaseSlug];
+      if (!entryId) return alert("Hệ thống chưa tải xong ID kết nối. Vui lòng thử lại sau vài giây.");
+
+      const root = this.shadowRoot;
+      const data = {
+          entry_id: entryId,
+          name: root.querySelector('#f_name').value,
+          place: root.querySelector('#f_place').value,
+          category: root.querySelector('#f_category').value,
+          price: parseFloat(root.querySelector('#f_price').value),
+          quantity: parseFloat(root.querySelector('#f_qty').value) || 1,
+          vat: parseFloat(root.querySelector('#f_vat').value) || 0,
+          status: root.querySelector('#f_status').value,
+          model: root.querySelector('#f_model').value || "",
+          manufacturer: root.querySelector('#f_manufacturer').value || "",
+          warranty_months: parseInt(root.querySelector('#f_warranty').value) || 0,
+      };
+
+      const pDate = root.querySelector('#f_date').value;
+      if (pDate) data.purchase_date = pDate;
+
+      this._hass.callService('shopping_history', 'add_order', data).then(() => {
+          this.switchTab('history');
+          // Xóa form
+          root.querySelector('#add-order-form').reset();
+      }).catch(err => alert("Lỗi khi thêm: " + err.message));
+    }
+
 
     updateView() {
       if (!this.card) return;
@@ -519,11 +578,8 @@
       const title = conf.title || "Shopping Khải";
       const configIcon = conf.icon || "mdi:cart-outline";
 
-      // --- 1. XỬ LÝ BACKGROUND, BORDER, SHADOW ---
-      const applyOpacityToGradientStr = (str, opacity) => {
-          return str.replace(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi, (match) => hexToRgba(match, opacity));
-      };
-
+      // --- 1. XỬ LÝ STYLE (Giữ nguyên logic cực xịn) ---
+      const applyOpacityToGradientStr = (str, opacity) => str.replace(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi, (match) => hexToRgba(match, opacity));
       const bgType = conf.bg_type || 'gradient';
       const bgOpacity = conf.bg_opacity !== undefined ? conf.bg_opacity : 60;
       let stringForContrastCalc = ""; 
@@ -546,22 +602,15 @@
           stringForContrastCalc = bgColor;
       }
 
-      // Border
       const borderEnabled = conf.border_enable !== undefined ? conf.border_enable : true;
       if (borderEnabled) {
           const borderWidth = conf.border_width !== undefined ? conf.border_width : 1;
           const borderOpacity = conf.border_opacity !== undefined ? conf.border_opacity : 10;
           const borderColor = conf.border_color || '#ffffff';
-          if (borderOpacity > 0 && borderWidth > 0) {
-              this.card.style.border = `${borderWidth}px solid ${hexToRgba(borderColor, borderOpacity)}`;
-          } else {
-              this.card.style.border = 'none';
-          }
-      } else {
-          this.card.style.border = 'none';
-      }
+          if (borderOpacity > 0 && borderWidth > 0) this.card.style.border = `${borderWidth}px solid ${hexToRgba(borderColor, borderOpacity)}`;
+          else this.card.style.border = 'none';
+      } else { this.card.style.border = 'none'; }
 
-      // Shadow
       const shadowEnabled = conf.shadow_enable !== undefined ? conf.shadow_enable : true;
       if (shadowEnabled) {
           const shadowColor = conf.shadow_color || '#000000';
@@ -570,18 +619,14 @@
           const offsetX = conf.shadow_offset_x !== undefined ? conf.shadow_offset_x : 0;
           const offsetY = conf.shadow_offset_y !== undefined ? conf.shadow_offset_y : 8;
           this.card.style.boxShadow = `${offsetX}px ${offsetY}px ${blur}px ${hexToRgba(shadowColor, shadowOpacity)}`;
-      } else {
-          this.card.style.boxShadow = 'none';
-      }
+      } else { this.card.style.boxShadow = 'none'; }
       
-      // Backdrop filter cho Glassmorphism
       this.card.style.backdropFilter = "blur(16px)";
       this.card.style.webkitBackdropFilter = "blur(16px)";
       this.card.style.borderRadius = "var(--ha-card-border-radius, 16px)";
       this.card.style.padding = "clamp(12px, 3vw, 16px)";
       this.card.style.overflow = "hidden";
 
-      // --- 2. XỬ LÝ MÀU SẮC & AUTO CONTRAST ---
       let c_text = conf.textColor || '#f8fafc';
       let c_accent = conf.accentColor || '#0ea5e9';
       let c_money = conf.moneyColor || '#38bdf8';
@@ -589,7 +634,7 @@
       let c_text_dim = '';
       let c_option_bg = '';
 
-      if (conf.auto_contrast !== false) { // Default là true
+      if (conf.auto_contrast !== false) { 
           const hexRegex = /#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi;
           let match;
           let colorsToCheck = [];
@@ -611,11 +656,8 @@
               avgB = Math.round(avgB / colorsToCheck.length);
 
               let isDarkTheme = false;
-              if (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) {
-                  isDarkTheme = this._hass.themes.darkMode;
-              } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                  isDarkTheme = true;
-              }
+              if (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) isDarkTheme = this._hass.themes.darkMode;
+              else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) isDarkTheme = true;
 
               const op = bgOpacity / 100;
               const baseBg = isDarkTheme ? 30 : 245; 
@@ -624,36 +666,191 @@
               const effB = Math.round(avgB * op + baseBg * (1 - op));
 
               const yiq = ((effR * 299) + (effG * 587) + (effB * 114)) / 1000;
-              const isLightBackground = yiq >= 135;
-
-              if (isLightBackground) {
-                  c_text = '#1a1a1a';
-                  c_text_dim = 'rgba(0,0,0,0.6)';
-                  c_accent = '#0284c7';
-                  c_money = '#ea580c';
-                  c_block = `rgba(0, 0, 0, Math.max(0.04, ${op * 0.1}))`; 
-                  c_option_bg = '#ffffff';
+              if (yiq >= 135) {
+                  c_text = '#1a1a1a'; c_text_dim = 'rgba(0,0,0,0.6)'; c_accent = '#0284c7'; c_money = '#ea580c';
+                  c_block = `rgba(0, 0, 0, Math.max(0.04, ${op * 0.1}))`; c_option_bg = '#ffffff';
               } else {
-                  c_text = '#f8fafc';
-                  c_text_dim = 'rgba(255,255,255,0.6)';
-                  c_accent = '#0ea5e9';
-                  c_money = '#38bdf8';
-                  c_block = `rgba(255, 255, 255, Math.max(0.05, ${op * 0.1}))`;
-                  c_option_bg = '#1e293b';
+                  c_text = '#f8fafc'; c_text_dim = 'rgba(255,255,255,0.6)'; c_accent = '#0ea5e9'; c_money = '#38bdf8';
+                  c_block = `rgba(255, 255, 255, Math.max(0.05, ${op * 0.1}))`; c_option_bg = '#1e293b';
               }
           }
       } else {
-          // Khi tắt auto_contrast, tự tính c_text_dim và c_option_bg dựa trên c_text
           c_text_dim = hexToRgba(c_text, 60);
           c_option_bg = c_block;
       }
 
-      const iconHtml = configIcon.includes(":") 
-          ? `<ha-icon icon="${configIcon}"></ha-icon>` 
-          : `<span class="emoji-icon">${configIcon}</span>`;
+      const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
+
+      // --- 2. HTML CHO TABS & CÁC TRANG ---
+      const tabHistoryClass = this._activeTab === 'history' ? 'active' : '';
+      const tabAddClass = this._activeTab === 'add' ? 'active' : '';
+
+      let contentHtml = '';
+
+      if (this._activeTab === 'history') {
+        contentHtml = `
+          <div class="controls fade-in">
+            <div class="control-box">
+              <ha-icon icon="mdi:calendar-check"></ha-icon>
+              <div style="width:100%; overflow:hidden;">
+                <div class="cb-label">Năm</div>
+                <select id="year-select">
+                  ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="control-box">
+              <ha-icon icon="mdi:calendar-month"></ha-icon>
+              <div style="width:100%; overflow:hidden;">
+                <div class="cb-label">Tháng</div>
+                <select id="month-select">
+                  <option value="all" ${this._selectedMonth === 'all' ? 'selected' : ''}>Cả năm</option>
+                  ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${this._selectedMonth === m ? 'selected' : ''}>Tháng ${m}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
+            <ha-icon icon="mdi:format-list-bulleted" style="font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
+            Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear}` : `Tháng ${this._selectedMonth}/${this._selectedYear}`}
+          </div>
+
+          <div class="table-wrapper fade-in">
+            <div class="t-header">
+              <div>Ngày</div>
+              <div>Thông tin SP</div>
+              <div style="text-align: right; padding-right: 32px;">Thành tiền</div>
+            </div>
+            
+            ${this._items.length === 0 ? `
+              <div class="empty-state-nice">
+                <ha-icon icon="mdi:cart-remove"></ha-icon>
+                <div class="empty-title">Chưa có dữ liệu</div>
+                <div class="empty-sub">Bạn chưa ghi nhận đơn hàng nào trong thời gian này. Hãy thêm mới để quản lý chi tiêu dễ dàng hơn nhé!</div>
+                <button class="btn-primary" id="btn-empty-add"><ha-icon icon="mdi:plus"></ha-icon> Thêm đơn hàng ngay</button>
+              </div>
+            ` : this._items.map(item => `
+              <div class="t-row">
+                <div class="col-date">
+                  <div>${formatDate(item.ngay_mua).split('/')[0]}/${formatDate(item.ngay_mua).split('/')[1]}</div>
+                  <div class="d-id">ID: ${item.id}</div>
+                </div>
+                <div class="col-info">
+                  <div class="info-name">${item.ten_hang}</div>
+                  <div class="info-sub">${item.model ? item.model + ' | ' : ''}${item.tinh_trang || 'Mới'} | ${item.noi_mua}</div>
+                </div>
+                <div class="col-price">
+                  <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
+                  <div class="price-qty">SL: ${item.so_luong}</div>
+                </div>
+                <div class="col-action">
+                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="stats-container fade-in">
+            <div class="stat-line">
+              <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
+              Tổng chi tiêu: <strong>${formatMoney(this._stats.total)} ₫</strong>
+            </div>
+            <div class="stat-line">
+              <ha-icon icon="mdi:package-variant-closed" style="color: #fbbf24; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
+              Tổng số đơn: <strong class="val-qty">${this._stats.orders} 📦</strong> <span style="font-size: 0.9em; opacity: 0.7;">(${this._stats.items} SP)</span>
+            </div>
+          </div>
+        `;
+      } else if (this._activeTab === 'add') {
+        const catOptions = Array.from(this._uniqueCategories).map(c => `<option value="${c}">`).join('');
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        contentHtml = `
+          <form id="add-order-form" class="fade-in">
+            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Ghi nhận đơn hàng mới</div>
+            <datalist id="cat-list">${catOptions}</datalist>
+            
+            <div class="form-row">
+              <div class="f-group">
+                <label>Tên hàng hóa <span style="color:var(--money)">*</span></label>
+                <input type="text" id="f_name" required placeholder="VD: iPhone 15 Pro Max">
+              </div>
+            </div>
+
+            <div class="form-row split">
+              <div class="f-group">
+                <label>Nơi mua <span style="color:var(--money)">*</span></label>
+                <input type="text" id="f_place" required placeholder="VD: Shopee">
+              </div>
+              <div class="f-group">
+                <label>Ngành hàng <span style="color:var(--money)">*</span></label>
+                <input type="text" id="f_category" required list="cat-list" placeholder="VD: Công nghệ">
+              </div>
+            </div>
+
+            <div class="form-row split">
+              <div class="f-group">
+                <label>Đơn giá (VNĐ) <span style="color:var(--money)">*</span></label>
+                <input type="number" id="f_price" required min="0" placeholder="0">
+              </div>
+              <div class="f-group" style="flex: 0.5;">
+                <label>Số lượng <span style="color:var(--money)">*</span></label>
+                <input type="number" id="f_qty" required min="0.1" step="0.1" value="1">
+              </div>
+            </div>
+
+            <div class="form-row split">
+              <div class="f-group">
+                <label>Ngày mua</label>
+                <input type="date" id="f_date" value="${todayStr}">
+              </div>
+              <div class="f-group">
+                <label>Tình trạng <span style="color:var(--money)">*</span></label>
+                <select id="f_status">
+                  <option value="Mới" selected>Mới</option>
+                  <option value="Cũ / Like New">Cũ / Like New</option>
+                  <option value="Hàng trưng bày">Hàng trưng bày</option>
+                  <option value="Hỏng / Xác">Hỏng / Xác</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-details-toggle" id="toggle-details">
+              <span>Nhập thông tin chi tiết (Model, BH, VAT...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>
+            </div>
+
+            <div class="form-details-content" id="details-content" style="display:none;">
+              <div class="form-row split">
+                <div class="f-group">
+                  <label>Mã Model</label>
+                  <input type="text" id="f_model" placeholder="Mã sản phẩm">
+                </div>
+                <div class="f-group">
+                  <label>Hãng SX</label>
+                  <input type="text" id="f_manufacturer" placeholder="Thương hiệu">
+                </div>
+              </div>
+              <div class="form-row split">
+                <div class="f-group">
+                  <label>Thuế VAT (%)</label>
+                  <input type="number" id="f_vat" min="0" max="100" value="0">
+                </div>
+                <div class="f-group">
+                  <label>Bảo hành (tháng)</label>
+                  <input type="number" id="f_warranty" min="0" value="0">
+                </div>
+              </div>
+            </div>
+
+            <button type="submit" class="btn-primary" style="width:100%; margin-top:16px; font-size: 16px; padding: 12px;">
+              <ha-icon icon="mdi:content-save-outline"></ha-icon> Lưu Đơn Hàng
+            </button>
+          </form>
+        `;
+      }
 
 
-      // --- 3. HIỂN THỊ HTML ---
       let html = `
         <style>
           :host {
@@ -666,215 +863,133 @@
             --glass-border: ${hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2)};
           }
 
-          .header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: clamp(18px, 5vw, 22px);
-            font-weight: 700;
-            margin-bottom: clamp(12px, 3vw, 16px);
-            color: var(--text-main);
-          }
-          .header ha-icon, .header .emoji-icon {
-             color: var(--text-main);
-             opacity: 0.9;
-          }
+          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: clamp(12px, 3vw, 16px); color: var(--text-main); }
+          .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
 
-          .controls {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: clamp(8px, 2vw, 12px);
-            margin-bottom: clamp(16px, 4vw, 20px);
-          }
+          /* TABS */
+          .tabs { display: flex; gap: 8px; margin-bottom: 16px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); }
+          .tab { flex: 1; text-align: center; padding: 8px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
+          .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+          .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
 
-          .control-box {
-            background: var(--block-bg);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            padding: clamp(6px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
-            display: flex;
-            align-items: center;
-            gap: clamp(6px, 2vw, 12px);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
-          }
-
-          .control-box ha-icon {
-            color: var(--accent);
-            font-size: clamp(20px, 5vw, 24px);
-          }
-
-          .control-box select {
-            background: transparent;
-            border: none;
-            color: var(--text-main);
-            font-size: clamp(13px, 3.5vw, 16px);
-            font-weight: 700;
-            width: 100%;
-            outline: none;
-            cursor: pointer;
-            appearance: none;
-            -webkit-appearance: none;
-            padding: 2px 0;
-          }
-          .control-box select option {
-            background-color: var(--option-bg);
-            color: var(--text-main);
-          }
-          
+          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: clamp(16px, 4vw, 20px); }
+          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(6px, 1.5vw, 8px) clamp(8px, 2vw, 12px); display: flex; align-items: center; gap: clamp(6px, 2vw, 12px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
+          .control-box ha-icon { color: var(--accent); font-size: clamp(20px, 5vw, 24px); }
+          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; width: 100%; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 2px 0; }
+          .control-box select option { background-color: var(--option-bg); color: var(--text-main); }
           .cb-label { font-size: clamp(9px, 2.5vw, 11px); color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;}
 
-          .stats-container {
-            margin-top: clamp(12px, 3vw, 16px);
-            padding-top: clamp(12px, 3vw, 16px);
-            border-top: 1px dashed var(--glass-border);
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-          }
-
-          .stat-line {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: clamp(12px, 3.5vw, 14px);
-            color: var(--text-dim);
-            font-weight: 500;
-          }
-          .stat-line strong {
-            color: var(--money);
-            font-size: clamp(14px, 4vw, 16px);
-            font-weight: 800;
-          }
+          .stats-container { margin-top: clamp(12px, 3vw, 16px); padding-top: clamp(12px, 3vw, 16px); border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; }
+          .stat-line { display: flex; align-items: center; gap: 8px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
+          .stat-line strong { color: var(--money); font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
           .stat-line .val-qty { color: #fbbf24; }
 
-          /* Bảng Chi Tiết Hiện Đại (Grid Responsive) */
-          .table-wrapper {
-            background: var(--block-bg);
-            border-radius: 12px;
-            border: 1px solid var(--glass-border);
-            overflow: hidden;
-            margin-top: clamp(12px, 3vw, 16px);
-          }
-
-          .t-header {
-            display: grid;
-            grid-template-columns: clamp(50px, 12vw, 70px) 1fr clamp(80px, 22vw, 110px);
-            padding: clamp(8px, 2vw, 12px);
-            background: rgba(0, 0, 0, 0.1);
-            border-bottom: 1px solid var(--glass-border);
-            font-size: clamp(10px, 2.5vw, 12px);
-            font-weight: 800;
-            color: var(--accent);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-
-          .t-row {
-            display: grid;
-            grid-template-columns: clamp(50px, 12vw, 70px) 1fr clamp(80px, 22vw, 110px);
-            padding: clamp(8px, 2vw, 12px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            align-items: center;
-            transition: background 0.2s;
-            gap: 4px;
-          }
+          /* Bảng Chi Tiết */
+          .table-wrapper { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; margin-top: clamp(12px, 3vw, 16px); }
+          .t-header { display: grid; grid-template-columns: clamp(50px, 12vw, 70px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 70px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); border-bottom: 1px solid rgba(255, 255, 255, 0.03); align-items: center; transition: background 0.2s; gap: 4px; }
           .t-row:last-child { border-bottom: none; }
           .t-row:hover { background: rgba(255, 255, 255, 0.05); }
-
           .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); }
           .col-date .d-id { font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
-          
           .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden;}
           .info-name { font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
           .info-sub { font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          
           .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden;}
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
+          .col-action { display: flex; align-items: center; justify-content: center; }
+          .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px;}
+          .btn-delete:hover { opacity: 1; transform: scale(1.1);}
 
-          .empty-state {
-            text-align: center;
-            padding: clamp(20px, 5vw, 30px) 10px;
-            color: var(--text-dim);
-            font-style: italic;
-            font-size: clamp(12px, 3vw, 14px);
-          }
+          /* Form Styles */
+          form { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); }
+          .form-title { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
+          .form-row { margin-bottom: 12px; }
+          .form-row.split { display: flex; gap: 12px; }
+          .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1;}
+          .f-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+          .f-group input, .f-group select { background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
+          .f-group input:focus, .f-group select:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          .f-group select option { background: var(--option-bg); color: var(--text-main); }
+          
+          .form-details-toggle { font-size: 13px; color: var(--accent); text-align: center; cursor: pointer; margin: 8px 0; display: flex; justify-content: center; align-items: center; gap: 4px; opacity: 0.8;}
+          .form-details-toggle:hover { opacity: 1; }
+
+          .btn-primary { background: var(--accent); color: #fff; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-family: inherit;}
+          .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+          
+          .empty-state-nice { text-align: center; padding: 32px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px;}
+          .empty-state-nice ha-icon { font-size: 64px; color: var(--text-dim); opacity: 0.5; margin-bottom: 8px;}
+          .empty-title { font-size: 18px; font-weight: 700; color: var(--text-main); }
+          .empty-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; max-width: 80%; line-height: 1.4;}
+
+          .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         </style>
 
         <div class="header">
           ${iconHtml} ${title}
         </div>
-
-        <div class="controls">
-          <div class="control-box">
-            <ha-icon icon="mdi:calendar-check"></ha-icon>
-            <div style="width:100%; overflow:hidden;">
-              <div class="cb-label">Năm</div>
-              <select id="year-select">
-                ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-
-          <div class="control-box">
-            <ha-icon icon="mdi:calendar-month"></ha-icon>
-            <div style="width:100%; overflow:hidden;">
-              <div class="cb-label">Tháng</div>
-              <select id="month-select">
-                <option value="all" ${this._selectedMonth === 'all' ? 'selected' : ''}>Cả năm</option>
-                ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => 
-                  `<option value="${m}" ${this._selectedMonth === m ? 'selected' : ''}>Tháng ${m}</option>`
-                ).join('')}
-              </select>
-            </div>
-          </div>
+        
+        <div class="tabs">
+           <div class="tab ${tabHistoryClass}" data-target="history">📋 Lịch sử</div>
+           <div class="tab ${tabAddClass}" data-target="add">➕ Thêm mới</div>
         </div>
 
-        <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
-          <ha-icon icon="mdi:format-list-bulleted" style="font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
-          Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear}` : `Tháng ${this._selectedMonth}/${this._selectedYear}`}
-        </div>
-
-        <div class="table-wrapper">
-          <div class="t-header">
-            <div>Ngày</div>
-            <div>Thông tin SP</div>
-            <div style="text-align: right;">Thành tiền</div>
-          </div>
-          
-          ${this._items.length === 0 ? `
-            <div class="empty-state">Không có đơn hàng nào trong thời gian này.</div>
-          ` : this._items.map(item => `
-            <div class="t-row">
-              <div class="col-date">
-                <div>${formatDate(item.ngay_mua).split('/')[0]}/${formatDate(item.ngay_mua).split('/')[1]}</div>
-                <div class="d-id">ID: ${item.id}</div>
-              </div>
-              <div class="col-info">
-                <div class="info-name">${item.ten_hang}</div>
-                <div class="info-sub">${item.model ? item.model + ' | ' : ''}${item.tinh_trang || 'Mới'} | ${item.noi_mua}</div>
-              </div>
-              <div class="col-price">
-                <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
-                <div class="price-qty">SL: ${item.so_luong}</div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-
-        <div class="stats-container">
-          <div class="stat-line">
-            <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
-            Tổng chi tiêu: <strong>${formatMoney(this._stats.total)} ₫</strong>
-          </div>
-          <div class="stat-line">
-            <ha-icon icon="mdi:package-variant-closed" style="color: #fbbf24; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
-            Tổng số đơn: <strong class="val-qty">${this._stats.orders} 📦</strong> <span style="font-size: 0.9em; opacity: 0.7;">(${this._stats.items} SP)</span>
-          </div>
-        </div>
+        ${contentHtml}
       `;
 
       this.card.innerHTML = html;
+
+      // --- 3. GẮN CÁC SỰ KIỆN (Event Listeners) SAU KHI RENDER ---
+      
+      // Chuyển Tab
+      this.card.querySelectorAll('.tab').forEach(t => {
+        t.addEventListener('click', (e) => {
+          this.switchTab(e.currentTarget.getAttribute('data-target'));
+        });
+      });
+
+      if (this._activeTab === 'history') {
+        const ySel = this.card.querySelector('#year-select');
+        const mSel = this.card.querySelector('#month-select');
+        const btnEmpty = this.card.querySelector('#btn-empty-add');
+        
+        if (ySel) ySel.addEventListener('change', (e) => { this._selectedYear = parseInt(e.target.value); this.updateData(); });
+        if (mSel) mSel.addEventListener('change', (e) => { this._selectedMonth = e.target.value === 'all' ? 'all' : parseInt(e.target.value); this.updateData(); });
+        if (btnEmpty) btnEmpty.addEventListener('click', () => this.switchTab('add'));
+        
+        // Nút xóa
+        this.card.querySelectorAll('.btn-delete').forEach(btn => {
+           btn.addEventListener('click', (e) => {
+             const id = e.currentTarget.getAttribute('data-id');
+             this.handleDeleteOrder(parseInt(id));
+           });
+        });
+      } 
+      else if (this._activeTab === 'add') {
+        // Toggle chi tiết phụ
+        const toggleBtn = this.card.querySelector('#toggle-details');
+        const detailContent = this.card.querySelector('#details-content');
+        if (toggleBtn && detailContent) {
+           toggleBtn.addEventListener('click', () => {
+              if (detailContent.style.display === 'none') {
+                 detailContent.style.display = 'block';
+                 toggleBtn.innerHTML = `<span>Ẩn thông tin chi tiết</span> <ha-icon icon="mdi:chevron-up"></ha-icon>`;
+              } else {
+                 detailContent.style.display = 'none';
+                 toggleBtn.innerHTML = `<span>Nhập thông tin chi tiết (Model, BH, VAT...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>`;
+              }
+           });
+        }
+        
+        // Xử lý Submit
+        const form = this.card.querySelector('#add-order-form');
+        if (form) {
+           form.addEventListener('submit', (e) => this.handleAddSubmit(e));
+        }
+      }
     }
   }
 
@@ -885,7 +1000,7 @@
   window.customCards.push({
     type: "shopping-history-card",
     name: "Lịch Sử Mua Sắm",
-    description: "Thẻ hiển thị chi tiết lịch sử mua sắm theo dạng Glassmorphism tùy biến.",
+    description: "Thẻ hiển thị chi tiết lịch sử mua sắm kèm tính năng nhập và xóa trực tiếp.",
     preview: true,
   });
 })();
