@@ -49,7 +49,7 @@
       if (!this._hass) return;
       
       const conf = this._config || {};
-      const currentTitle = conf.title || "Shopping Khải";
+      const currentTitle = conf.title || "Quản Lý Mua Sắm";
       const currentIcon = conf.icon || "mdi:cart-outline";
 
       this.innerHTML = `
@@ -91,8 +91,8 @@
             </div>
             <div class="section-content">
               <div class="row-col">
-                <span class="label">Tiêu đề thẻ (Tuỳ chọn)</span>
-                <input type="text" id="title-input" class="custom-input config-trigger" placeholder="VD: Shopping Khải" value="${currentTitle}">
+                <span class="label">Tiêu đề thẻ chính (Tuỳ chọn)</span>
+                <input type="text" id="title-input" class="custom-input config-trigger" placeholder="VD: Quản Lý Mua Sắm" value="${currentTitle}">
               </div>
               <div class="row-col">
                 <span class="label">Icon hoặc Emoji (Tuỳ chọn)</span>
@@ -370,7 +370,7 @@
   // ==========================================
   class ShoppingHistoryCard extends HTMLElement {
     static getConfigElement() { return document.createElement('shopping-history-editor'); }
-    static getStubConfig() { return { title: "Shopping Khải", icon: "mdi:cart-outline", bg_opacity: 60 }; }
+    static getStubConfig() { return { title: "Quản Lý Mua Sắm", icon: "mdi:cart-outline", bg_opacity: 60 }; }
 
     constructor() {
       super();
@@ -381,7 +381,11 @@
       this._selectedYear = now.getFullYear();
       this._selectedMonth = now.getMonth() + 1;
       
-      this._sensorMap = {}; // Lưu map [year] => [entity_id] để gọi chính xác
+      // Quản lý Profile (Hồ sơ)
+      this._profilesData = {}; // Cấu trúc: { "Tên hồ sơ": { years: Set(), map: { year: entity_id } } }
+      this._profileNames = [];
+      this._currentProfile = null;
+      
       this._availableYears = [];
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
@@ -407,10 +411,9 @@
         this.updateData();
       } else {
         let shouldUpdate = false;
-        // Quét các sensor có chứa thuộc tính cần thiết, không phụ thuộc tên entity
         const relevantSensors = Object.keys(hass.states).filter(k => 
             k.startsWith('sensor.') && 
-            hass.states[k].attributes.danh_sach_chi_tiet && 
+            hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
             hass.states[k].attributes.nam !== undefined
         );
         for (let eid of relevantSensors) {
@@ -451,40 +454,65 @@
     scanSensors() {
       if (!this._hass) return;
       
-      // Cách quét an toàn: Bắt sensor bằng thuộc tính (attributes) thay vì regex tên
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
         this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
         this._hass.states[eid].attributes.nam !== undefined
       );
 
-      const years = new Set();
-      this._sensorMap = {}; // Reset lại map
+      this._profilesData = {}; 
 
       yearSensors.forEach(eid => {
-        const y = parseInt(this._hass.states[eid].attributes.nam);
+        const state = this._hass.states[eid];
+        const y = parseInt(state.attributes.nam);
+        
         if (!isNaN(y)) {
-            years.add(y);
-            this._sensorMap[y] = eid; // Gắn year vào entity_id chính xác
-            this.fetchEntryId(eid); // Lấy config_entry_id của sensor này
+            // Lọc tên Profile từ friendly_name (Cắt bỏ chữ "Năm YYYY" ở cuối nếu có)
+            let pName = state.attributes.friendly_name || eid;
+            pName = pName.replace(/\s*Năm\s*\d{4}$/i, '').trim();
+
+            if (!this._profilesData[pName]) {
+                this._profilesData[pName] = { years: new Set(), map: {} };
+            }
+            this._profilesData[pName].years.add(y);
+            this._profilesData[pName].map[y] = eid;
+            
+            this.fetchEntryId(eid); 
         }
       });
 
-      this._availableYears = Array.from(years).sort((a, b) => b - a);
-      if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
-          this._selectedYear = this._availableYears[0];
+      this._profileNames = Object.keys(this._profilesData).sort();
+      
+      // Khởi tạo profile mặc định nếu chưa có
+      if ((!this._currentProfile || !this._profileNames.includes(this._currentProfile)) && this._profileNames.length > 0) {
+          this._currentProfile = this._profileNames[0];
+      }
+
+      // Cập nhật mảng năm cho profile hiện tại
+      if (this._currentProfile && this._profilesData[this._currentProfile]) {
+          this._availableYears = Array.from(this._profilesData[this._currentProfile].years).sort((a, b) => b - a);
+          if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
+              this._selectedYear = this._availableYears[0];
+          }
+      } else {
+          this._availableYears = [];
       }
     }
 
     updateData() {
-      if (!this._hass) return;
+      if (!this._hass || !this._currentProfile) return;
 
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       this._uniqueCategories.clear();
 
-      // Dùng entity_id chính xác theo year mà thẻ đã map được
-      const yearEid = this._sensorMap[this._selectedYear];
+      const currentProf = this._profilesData[this._currentProfile];
+      if (!currentProf) {
+          this.updateView();
+          return;
+      }
+
+      const yearEid = currentProf.map[this._selectedYear];
       if (!yearEid) {
           this.updateView();
           return;
@@ -528,33 +556,30 @@
     }
 
     handleDeleteOrder(orderId) {
-      const currentEid = this._sensorMap[this._selectedYear];
+      const currentEid = this._profilesData[this._currentProfile]?.map[this._selectedYear];
       if(!currentEid) return;
       
       const entryId = this._entryIds[currentEid];
-      if (!entryId) return alert("Hệ thống chưa tải xong ID kết nối. Vui lòng thử lại sau vài giây.");
+      if (!entryId) return alert("Hệ thống chưa tải xong kết nối. Vui lòng thử lại sau vài giây.");
       
-      if (confirm(`Bạn có chắc chắn muốn xóa đơn hàng ID: ${orderId} không?`)) {
+      if (confirm(`Bạn có chắc chắn muốn xóa đơn hàng ID: ${orderId} của [${this._currentProfile}] không?`)) {
         this._hass.callService('shopping_history', 'delete_order', {
           entry_id: entryId,
           order_id: orderId
-        }).then(() => {
-          // Thành công
-        }).catch(err => {
-          alert("Lỗi khi xóa: " + err.message);
-        });
+        }).then(() => {}).catch(err => alert("Lỗi khi xóa: " + err.message));
       }
     }
 
     handleAddSubmit(e) {
       e.preventDefault();
       
-      // Lấy entry_id từ sensor đang select (hoặc sensor đầu tiên có sẵn)
-      const currentEid = this._sensorMap[this._selectedYear] || Object.values(this._sensorMap)[0];
-      if (!currentEid) return alert("Chưa có cấu hình lịch sử mua sắm nào để lưu!");
+      // Lấy ngẫu nhiên 1 entity_id của profile hiện tại để xác định entry_id đích
+      const profileMap = this._profilesData[this._currentProfile]?.map;
+      const currentEid = profileMap ? Object.values(profileMap)[0] : null;
+      if (!currentEid) return alert("Chưa có cơ sở dữ liệu để lưu!");
 
       const entryId = this._entryIds[currentEid];
-      if (!entryId) return alert("Hệ thống chưa tải xong ID kết nối. Vui lòng thử lại sau vài giây.");
+      if (!entryId) return alert("Hệ thống chưa tải xong kết nối. Vui lòng thử lại sau vài giây.");
 
       const root = this.shadowRoot;
       const data = {
@@ -576,8 +601,6 @@
 
       this._hass.callService('shopping_history', 'add_order', data).then(() => {
           this.switchTab('history');
-          // Xóa dữ liệu form
-          root.querySelector('#add-order-form').reset();
       }).catch(err => alert("Lỗi khi thêm: " + err.message));
     }
 
@@ -586,7 +609,7 @@
       if (!this.card) return;
 
       const conf = this._config || {};
-      const title = conf.title || "Shopping Khải";
+      const title = conf.title || "Quản Lý Mua Sắm";
       const configIcon = conf.icon || "mdi:cart-outline";
 
       // --- 1. XỬ LÝ STYLE ---
@@ -692,6 +715,29 @@
 
       const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
 
+      // --- TÍNH TOÁN THANH CHỌN HỒ SƠ ---
+      const pIdx = this._profileNames.indexOf(this._currentProfile);
+      const prevOpacity = pIdx > 0 ? 0.8 : 0.2;
+      const prevPointer = pIdx > 0 ? 'auto' : 'none';
+      const nextOpacity = pIdx < this._profileNames.length - 1 ? 0.8 : 0.2;
+      const nextPointer = pIdx < this._profileNames.length - 1 ? 'auto' : 'none';
+
+      let profileNavHtml = '';
+      if (this._profileNames.length > 0) {
+        profileNavHtml = `
+          <div class="profile-selector fade-in">
+              <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
+              <div style="flex:1; display:flex; align-items:center; justify-content:center; gap: 6px;">
+                  <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px;"></ha-icon>
+                  <select id="profile-select">
+                      ${this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')}
+                  </select>
+              </div>
+              <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
+          </div>
+        `;
+      }
+
       // --- 2. HTML CHO TABS & CÁC TRANG ---
       const tabHistoryClass = this._activeTab === 'history' ? 'active' : '';
       const tabAddClass = this._activeTab === 'add' ? 'active' : '';
@@ -707,6 +753,7 @@
                 <div class="cb-label">Năm</div>
                 <select id="year-select">
                   ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+                  ${this._availableYears.length === 0 ? `<option value="">---</option>` : ''}
                 </select>
               </div>
             </div>
@@ -724,7 +771,7 @@
 
           <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
             <ha-icon icon="mdi:format-list-bulleted" style="font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
-            Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear}` : `Tháng ${this._selectedMonth}/${this._selectedYear}`}
+            Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear || '--'}` : `Tháng ${this._selectedMonth}/${this._selectedYear || '--'}`}
           </div>
 
           <div class="table-wrapper fade-in">
@@ -738,7 +785,7 @@
               <div class="empty-state-nice">
                 <ha-icon icon="mdi:cart-remove"></ha-icon>
                 <div class="empty-title">Chưa có dữ liệu</div>
-                <div class="empty-sub">Bạn chưa ghi nhận đơn hàng nào trong thời gian này. Hãy thêm mới để quản lý chi tiêu dễ dàng hơn nhé!</div>
+                <div class="empty-sub">Hồ sơ này chưa có đơn hàng nào trong thời gian bạn chọn.</div>
                 <button class="btn-primary" id="btn-empty-add"><ha-icon icon="mdi:plus"></ha-icon> Thêm đơn hàng ngay</button>
               </div>
             ` : this._items.map(item => `
@@ -779,7 +826,7 @@
 
         contentHtml = `
           <form id="add-order-form" class="fade-in">
-            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Ghi nhận đơn hàng mới</div>
+            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${this._currentProfile || 'Mặc định'}</div>
             <datalist id="cat-list">${catOptions}</datalist>
             
             <div class="form-row">
@@ -874,8 +921,15 @@
             --glass-border: ${hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2)};
           }
 
-          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: clamp(12px, 3vw, 16px); color: var(--text-main); }
+          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 16px; color: var(--text-main); }
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
+
+          /* PROFILE SELECTOR */
+          .profile-selector { display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 6px 12px; margin-bottom: 16px; border: 1px solid var(--glass-border); }
+          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 800; font-size: clamp(14px, 4vw, 16px); text-align: center; flex: 1; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
+          .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
+          .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px;}
+          .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
 
           /* TABS */
           .tabs { display: flex; gap: 8px; margin-bottom: 16px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); }
@@ -942,6 +996,8 @@
         <div class="header">
           ${iconHtml} ${title}
         </div>
+
+        ${profileNavHtml}
         
         <div class="tabs">
            <div class="tab ${tabHistoryClass}" data-target="history">📋 Lịch sử</div>
@@ -953,13 +1009,49 @@
 
       this.card.innerHTML = html;
 
-      // --- 3. GẮN CÁC SỰ KIỆN (Event Listeners) SAU KHI RENDER ---
+      // --- 3. GẮN CÁC SỰ KIỆN (Event Listeners) ---
       
+      // Chuyển Tab
       this.card.querySelectorAll('.tab').forEach(t => {
         t.addEventListener('click', (e) => {
           this.switchTab(e.currentTarget.getAttribute('data-target'));
         });
       });
+
+      // Events cho Profile Selector
+      const profSel = this.card.querySelector('#profile-select');
+      const prevProf = this.card.querySelector('#prev-profile');
+      const nextProf = this.card.querySelector('#next-profile');
+
+      if (profSel) {
+          profSel.addEventListener('change', (e) => {
+              this._currentProfile = e.target.value;
+              this.scanSensors();
+              this.updateData();
+          });
+      }
+
+      if (prevProf) {
+          prevProf.addEventListener('click', () => {
+              let idx = this._profileNames.indexOf(this._currentProfile);
+              if (idx > 0) {
+                  this._currentProfile = this._profileNames[idx - 1];
+                  this.scanSensors();
+                  this.updateData();
+              }
+          });
+      }
+
+      if (nextProf) {
+          nextProf.addEventListener('click', () => {
+              let idx = this._profileNames.indexOf(this._currentProfile);
+              if (idx < this._profileNames.length - 1) {
+                  this._currentProfile = this._profileNames[idx + 1];
+                  this.scanSensors();
+                  this.updateData();
+              }
+          });
+      }
 
       if (this._activeTab === 'history') {
         const ySel = this.card.querySelector('#year-select');
@@ -1007,7 +1099,7 @@
   window.customCards.push({
     type: "shopping-history-card",
     name: "Lịch Sử Mua Sắm",
-    description: "Thẻ hiển thị chi tiết lịch sử mua sắm kèm tính năng nhập và xóa trực tiếp.",
+    description: "Thẻ hiển thị chi tiết lịch sử mua sắm đa cấu hình, kèm tính năng nhập và xóa trực tiếp.",
     preview: true,
   });
 })();
