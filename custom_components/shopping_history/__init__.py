@@ -8,9 +8,11 @@ import homeassistant.util.dt as dt_util
 from dateutil.relativedelta import relativedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, CoreState
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.loader import async_get_integration
 
 # --- THÊM CÁC IMPORT CHO GIAO DIỆN UI LÊN LOVELACE ---
 from homeassistant.components.http import StaticPathConfig
@@ -47,55 +49,53 @@ SERVICE_DELETE_ORDER_SCHEMA = vol.Schema({
 })
 
 # =========================================================
-# HÀM TỰ ĐỘNG THÊM THẺ VÀO LOVELACE RESOURCES
+# HÀM TỰ ĐỘNG THÊM THẺ VÀO LOVELACE RESOURCES (ĐÃ NÂNG CẤP)
 # =========================================================
-async def init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
-    """Hàm tự động thêm thẻ vào Lovelace Resources với định dạng hacstag."""
+async def init_resource(hass: HomeAssistant, url: str, ver: str) -> None:
+    """Đảm bảo Resource được đăng ký vào Lovelace một cách an toàn và triệt để."""
     url_with_version = f"{url}?hacstag={ver}"
 
-    if "lovelace" not in hass.data:
-        _LOGGER.debug("Lovelace chưa được tải, sử dụng add_extra_js_url fallback.")
-        add_extra_js_url(hass, url_with_version)
-        return False
+    # 1. Luôn chèn tạm thời vào session hiện tại (Tác dụng tức thì, hỗ trợ cả YAML mode)
+    add_extra_js_url(hass, url_with_version)
 
-    lovelace = hass.data.get("lovelace")
-    resources: ResourceStorageCollection = (
-        lovelace.resources if hasattr(lovelace, "resources") else lovelace.get("resources")
-    )
+    # 2. Hàm đăng ký vĩnh viễn vào Database của Lovelace (Storage Mode)
+    async def _register_resource(*args):
+        lovelace = hass.data.get("lovelace")
+        if not lovelace:
+            _LOGGER.debug("Lovelace không được tìm thấy, bỏ qua đăng ký Storage.")
+            return
 
-    if not resources:
-        return False
+        resources = getattr(lovelace, "resources", None) or lovelace.get("resources")
+        if not isinstance(resources, ResourceStorageCollection):
+            _LOGGER.debug("Lovelace đang ở chế độ YAML, không thể ghi vào Storage.")
+            return
 
-    if hasattr(resources, "async_get_info"):
-        await resources.async_get_info()
+        # Đảm bảo Resource collection đã được load từ file storage
+        if not resources.loaded:
+            await resources.async_load()
 
-    for item in resources.async_items():
-        item_url = item.get("url", "")
-        
-        # LOGIC SO SÁNH CHÍNH XÁC: Phải khớp hoàn toàn hoặc chỉ khác tham số phía sau ?
-        if item_url == url or item_url.startswith(f"{url}?"):
-            if item_url.endswith(f"hacstag={ver}"):
-                return False # Đã đúng phiên bản, không làm gì cả
+        for item in resources.async_items():
+            item_url = item.get("url", "")
+            base_url = item_url.split("?")[0]
+            
+            # Nếu URL đã tồn tại
+            if base_url == url:
+                # Nếu version khác (bản cập nhật mới) thì tiến hành Update
+                if item_url != url_with_version:
+                    _LOGGER.info(f"Cập nhật version Lovelace resource: {url_with_version}")
+                    await resources.async_update_item(item["id"], {"res_type": "module", "url": url_with_version})
+                return # Thoát hàm nếu đã có (hoặc đã cập nhật)
 
-            _LOGGER.debug(f"Cập nhật Lovelace resource thành: {url_with_version}")
-
-            if isinstance(resources, ResourceStorageCollection):
-                await resources.async_update_item(
-                    item["id"], {"res_type": "module", "url": url_with_version}
-                )
-            else:
-                item["url"] = url_with_version
-
-            return True
-
-    if isinstance(resources, ResourceStorageCollection):
-        _LOGGER.debug(f"Thêm mới Lovelace resource: {url_with_version}")
+        # Nếu quét xong không thấy URL này, tiến hành tạo mới
+        _LOGGER.info(f"Thêm mới Lovelace resource: {url_with_version}")
         await resources.async_create_item({"res_type": "module", "url": url_with_version})
-    else:
-        _LOGGER.debug(f"Thêm extra JS module (chế độ YAML): {url_with_version}")
-        add_extra_js_url(hass, url_with_version)
 
-    return True
+    # 3. Kích hoạt đúng thời điểm:
+    # Nếu HA đã khởi động xong thì chạy luôn, nếu chưa thì đợi Event Started
+    if hass.state == CoreState.running:
+        await _register_resource()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_resource)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -116,7 +116,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async def handle_add_order(call: ServiceCall):
         entry_id = call.data.get("entry_id")
         
-        # Tìm DB path tương ứng với entry_id được chọn
         entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
         if not entry_data:
             _LOGGER.error(f"Không tìm thấy cấu hình Shopping History cho Entry ID: {entry_id}")
@@ -125,7 +124,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         db_path = entry_data["db_path"]
         data = call.data
         
-        # Xử lý ngày mua
         if data.get("purchase_date"):
             purchase_dt = dt_util.parse_date(data["purchase_date"])
         else:
@@ -134,12 +132,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         y, m, d = purchase_dt.year, purchase_dt.month, purchase_dt.day
         date_str = purchase_dt.strftime("%Y-%m-%d")
 
-        # Tính toán tiền
         total_pre_tax = data["price"] * data["quantity"]
         vat_amt = total_pre_tax * (data["vat"] / 100) if data["vat"] > 0 else 0
         total_post_tax = total_pre_tax + vat_amt
 
-        # Xử lý bảo hành
         warranty_end_str = ""
         if data["warranty_months"] > 0:
             end_date = purchase_dt + relativedelta(months=data["warranty_months"])
@@ -149,7 +145,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
 
-            # A. Thêm vào bảng chính
             cursor.execute("""
                 INSERT INTO purchases (
                     ngay_mua, nam, thang, ngay, 
@@ -166,23 +161,19 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 data["warranty_months"], warranty_end_str
             ))
 
-            # B. Cập nhật thống kê THÁNG
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nam=? AND thang=?", (y, m))
             m_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO monthly_stats VALUES (?, ?, ?, ?, ?)", (y, m, m_res[0] or 0, m_res[1] or 0, m_res[2] or 0))
 
-            # C. Cập nhật thống kê NĂM
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nam=?", (y,))
             y_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO yearly_stats VALUES (?, ?, ?, ?)", (y, y_res[0] or 0, y_res[1] or 0, y_res[2] or 0))
 
-            # D. Cập nhật thống kê NGÀNH HÀNG
             cat = data["category"]
             cursor.execute("SELECT SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nganh_hang=?", (cat,))
             c_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO category_stats VALUES (?, ?, ?)", (cat, c_res[0] or 0, c_res[1] or 0))
 
-            # E. Cập nhật TỔNG CỘNG
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases")
             g_res = cursor.fetchone()
             cursor.execute("DELETE FROM grand_total")
@@ -191,11 +182,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             conn.commit()
             conn.close()
 
-        # Chạy tác vụ ghi DB
         await hass.async_add_executor_job(db_insert_work)
         _LOGGER.info(f"Đã thêm đơn hàng mới vào DB: {db_path}")
-        
-        # Gửi tín hiệu cập nhật sensor
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
 
     # ------------------------------------------------------------------
@@ -216,7 +204,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
 
-            # A. Lấy thông tin đơn hàng trước khi xóa để biết thuộc tháng/năm nào
             cursor.execute("SELECT nam, thang, nganh_hang FROM purchases WHERE id=?", (order_id,))
             row = cursor.fetchone()
             
@@ -227,27 +214,21 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
             y, m, cat = row[0], row[1], row[2]
 
-            # B. Xóa đơn hàng
             cursor.execute("DELETE FROM purchases WHERE id=?", (order_id,))
 
-            # C. Tính toán lại Monthly Stats (Tháng bị ảnh hưởng)
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nam=? AND thang=?", (y, m))
             m_res = cursor.fetchone()
-            # Dùng `or 0` để xử lý trường hợp xóa hết đơn hàng trả về None
             cursor.execute("INSERT OR REPLACE INTO monthly_stats VALUES (?, ?, ?, ?, ?)", (y, m, m_res[0] or 0, m_res[1] or 0, m_res[2] or 0))
 
-            # D. Tính toán lại Yearly Stats (Năm bị ảnh hưởng)
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nam=?", (y,))
             y_res = cursor.fetchone()
             cursor.execute("INSERT OR REPLACE INTO yearly_stats VALUES (?, ?, ?, ?)", (y, y_res[0] or 0, y_res[1] or 0, y_res[2] or 0))
 
-            # E. Tính toán lại Category Stats (Ngành hàng bị ảnh hưởng)
             if cat:
                 cursor.execute("SELECT SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases WHERE nganh_hang=?", (cat,))
                 c_res = cursor.fetchone()
                 cursor.execute("INSERT OR REPLACE INTO category_stats VALUES (?, ?, ?)", (cat, c_res[0] or 0, c_res[1] or 0))
 
-            # F. Tính toán lại Grand Total (Tổng cộng)
             cursor.execute("SELECT COUNT(*), SUM(so_luong), SUM(thanh_tien_sau_vat) FROM purchases")
             g_res = cursor.fetchone()
             cursor.execute("DELETE FROM grand_total")
@@ -256,14 +237,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             conn.commit()
             conn.close()
 
-        # Chạy tác vụ xóa DB
         await hass.async_add_executor_job(db_delete_work)
         _LOGGER.info(f"Đã xóa đơn hàng {order_id} khỏi DB: {db_path}")
-        
-        # Gửi tín hiệu cập nhật sensor NGAY LẬP TỨC
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
 
-    # Đăng ký services vào hệ thống Home Assistant
     hass.services.async_register(DOMAIN, "add_order", handle_add_order, schema=SERVICE_ADD_ORDER_SCHEMA)
     hass.services.async_register(DOMAIN, "delete_order", handle_delete_order, schema=SERVICE_DELETE_ORDER_SCHEMA)
 
@@ -275,8 +252,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ---------------------------------------------------------
     # AUTO CACHE BUSTING KẾT HỢP MANIFEST FALLBACK (Dành cho thẻ UI)
     # ---------------------------------------------------------
-    integration = hass.data.get("integrations", {}).get(DOMAIN)
-    fallback_version = getattr(integration, "version", "1.0")
+    # Sử dụng async_get_integration để lấy chính xác thông tin từ manifest
+    integration = await async_get_integration(hass, DOMAIN)
+    fallback_version = integration.version if integration and integration.version else "1.0"
     
     def get_file_version(file_name, fallback):
         try:
@@ -296,8 +274,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # --- CẤU HÌNH ĐƯỜNG DẪN AN TOÀN ---
     storage_dir = hass.config.path("shopping_history")
     
-    if not os.path.exists(storage_dir):
-        await hass.async_add_executor_job(os.makedirs, storage_dir)
+    def create_dir():
+        os.makedirs(storage_dir, exist_ok=True)
+    await hass.async_add_executor_job(create_dir)
 
     # File DB riêng biệt cho từng entry_id
     db_path = os.path.join(storage_dir, f"shopping_data_{entry.entry_id}.db")
@@ -313,7 +292,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # 1. Tạo bảng purchases
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS purchases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -336,7 +314,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         """)
         
-        # 2. Migration: Thêm cột noi_mua nếu DB cũ chưa có
         try:
             cursor.execute("PRAGMA table_info(purchases)")
             columns = [info[1] for info in cursor.fetchall()]
@@ -345,7 +322,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception as e:
             _LOGGER.error(f"Migration Error: {e}")
 
-        # 3. Tạo các bảng thống kê
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS monthly_stats (
                 nam INTEGER, thang INTEGER,
