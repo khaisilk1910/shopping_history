@@ -381,13 +381,11 @@
       this._selectedYear = now.getFullYear();
       this._selectedMonth = now.getMonth() + 1;
       
-      this._baseSlugs = [];
-      this._currentBaseSlug = null;
+      this._sensorMap = {}; // Lưu map [year] => [entity_id] để gọi chính xác
       this._availableYears = [];
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       
-      // Khai báo quản lý tab và entry_id
       this._activeTab = 'history'; 
       this._entryIds = {}; 
       this._uniqueCategories = new Set();
@@ -409,7 +407,12 @@
         this.updateData();
       } else {
         let shouldUpdate = false;
-        const relevantSensors = Object.keys(hass.states).filter(k => k.startsWith('sensor.') && k.includes('_year_'));
+        // Quét các sensor có chứa thuộc tính cần thiết, không phụ thuộc tên entity
+        const relevantSensors = Object.keys(hass.states).filter(k => 
+            k.startsWith('sensor.') && 
+            hass.states[k].attributes.danh_sach_chi_tiet && 
+            hass.states[k].attributes.nam !== undefined
+        );
         for (let eid of relevantSensors) {
             if (oldHass.states[eid] !== hass.states[eid]) {
                 shouldUpdate = true;
@@ -423,24 +426,22 @@
       }
     }
 
-    // Tự động tìm config_entry_id cho backend service
-    async fetchEntryId(entityId, baseSlug) {
-      if (this._entryIds[baseSlug]) return; // Đã lấy rồi
+    // Lấy config_entry_id ngầm qua API
+    async fetchEntryId(entityId) {
+      if (this._entryIds[entityId]) return; 
       
-      // Cách 1: Thử lấy trực tiếp từ hass.entities (nếu có sẵn)
       if (this._hass.entities && this._hass.entities[entityId]) {
-         this._entryIds[baseSlug] = this._hass.entities[entityId].config_entry_id;
+         this._entryIds[entityId] = this._hass.entities[entityId].config_entry_id;
          return;
       }
       
-      // Cách 2: Gọi WebSocket API
       try {
         const result = await this._hass.callWS({
           type: 'config/entity_registry/get',
           entity_id: entityId
         });
         if (result && result.config_entry_id) {
-          this._entryIds[baseSlug] = result.config_entry_id;
+          this._entryIds[entityId] = result.config_entry_id;
         }
       } catch (err) {
         console.warn("Shopping History: Không thể lấy config_entry_id cho", entityId);
@@ -450,27 +451,24 @@
     scanSensors() {
       if (!this._hass) return;
       
+      // Cách quét an toàn: Bắt sensor bằng thuộc tính (attributes) thay vì regex tên
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
-        eid.startsWith('sensor.') && eid.includes('_year_') && this._hass.states[eid].attributes.danh_sach_chi_tiet
+        eid.startsWith('sensor.') && 
+        this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+        this._hass.states[eid].attributes.nam !== undefined
       );
 
-      const bases = new Set();
       const years = new Set();
+      this._sensorMap = {}; // Reset lại map
 
       yearSensors.forEach(eid => {
-        const match = eid.match(/^sensor\.(.+)_year_(\d{4})$/);
-        if (match) {
-            bases.add(match[1]);
-            years.add(parseInt(match[2]));
-            // Lấy ID cấu hình ngầm dưới nền
-            this.fetchEntryId(eid, match[1]);
+        const y = parseInt(this._hass.states[eid].attributes.nam);
+        if (!isNaN(y)) {
+            years.add(y);
+            this._sensorMap[y] = eid; // Gắn year vào entity_id chính xác
+            this.fetchEntryId(eid); // Lấy config_entry_id của sensor này
         }
       });
-
-      this._baseSlugs = Array.from(bases);
-      if (!this._currentBaseSlug && this._baseSlugs.length > 0) {
-          this._currentBaseSlug = this._baseSlugs[0];
-      }
 
       this._availableYears = Array.from(years).sort((a, b) => b - a);
       if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
@@ -479,19 +477,24 @@
     }
 
     updateData() {
-      if (!this._hass || !this._currentBaseSlug) return;
+      if (!this._hass) return;
 
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       this._uniqueCategories.clear();
 
-      const yearEid = `sensor.${this._currentBaseSlug}_year_${this._selectedYear}`;
+      // Dùng entity_id chính xác theo year mà thẻ đã map được
+      const yearEid = this._sensorMap[this._selectedYear];
+      if (!yearEid) {
+          this.updateView();
+          return;
+      }
+
       const yearState = this._hass.states[yearEid];
       
       if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
           const allItems = yearState.attributes.danh_sach_chi_tiet;
           
-          // Trích xuất Ngành hàng cho gợi ý gõ nhanh
           allItems.forEach(i => { if(i.nganh_hang) this._uniqueCategories.add(i.nganh_hang); });
           
           if (this._selectedMonth === 'all') {
@@ -525,7 +528,10 @@
     }
 
     handleDeleteOrder(orderId) {
-      const entryId = this._entryIds[this._currentBaseSlug];
+      const currentEid = this._sensorMap[this._selectedYear];
+      if(!currentEid) return;
+      
+      const entryId = this._entryIds[currentEid];
       if (!entryId) return alert("Hệ thống chưa tải xong ID kết nối. Vui lòng thử lại sau vài giây.");
       
       if (confirm(`Bạn có chắc chắn muốn xóa đơn hàng ID: ${orderId} không?`)) {
@@ -533,7 +539,7 @@
           entry_id: entryId,
           order_id: orderId
         }).then(() => {
-          // Toast thành công có thể thêm ở đây
+          // Thành công
         }).catch(err => {
           alert("Lỗi khi xóa: " + err.message);
         });
@@ -542,7 +548,12 @@
 
     handleAddSubmit(e) {
       e.preventDefault();
-      const entryId = this._entryIds[this._currentBaseSlug];
+      
+      // Lấy entry_id từ sensor đang select (hoặc sensor đầu tiên có sẵn)
+      const currentEid = this._sensorMap[this._selectedYear] || Object.values(this._sensorMap)[0];
+      if (!currentEid) return alert("Chưa có cấu hình lịch sử mua sắm nào để lưu!");
+
+      const entryId = this._entryIds[currentEid];
       if (!entryId) return alert("Hệ thống chưa tải xong ID kết nối. Vui lòng thử lại sau vài giây.");
 
       const root = this.shadowRoot;
@@ -565,7 +576,7 @@
 
       this._hass.callService('shopping_history', 'add_order', data).then(() => {
           this.switchTab('history');
-          // Xóa form
+          // Xóa dữ liệu form
           root.querySelector('#add-order-form').reset();
       }).catch(err => alert("Lỗi khi thêm: " + err.message));
     }
@@ -578,7 +589,7 @@
       const title = conf.title || "Shopping Khải";
       const configIcon = conf.icon || "mdi:cart-outline";
 
-      // --- 1. XỬ LÝ STYLE (Giữ nguyên logic cực xịn) ---
+      // --- 1. XỬ LÝ STYLE ---
       const applyOpacityToGradientStr = (str, opacity) => str.replace(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi, (match) => hexToRgba(match, opacity));
       const bgType = conf.bg_type || 'gradient';
       const bgOpacity = conf.bg_opacity !== undefined ? conf.bg_opacity : 60;
@@ -944,7 +955,6 @@
 
       // --- 3. GẮN CÁC SỰ KIỆN (Event Listeners) SAU KHI RENDER ---
       
-      // Chuyển Tab
       this.card.querySelectorAll('.tab').forEach(t => {
         t.addEventListener('click', (e) => {
           this.switchTab(e.currentTarget.getAttribute('data-target'));
@@ -960,7 +970,6 @@
         if (mSel) mSel.addEventListener('change', (e) => { this._selectedMonth = e.target.value === 'all' ? 'all' : parseInt(e.target.value); this.updateData(); });
         if (btnEmpty) btnEmpty.addEventListener('click', () => this.switchTab('add'));
         
-        // Nút xóa
         this.card.querySelectorAll('.btn-delete').forEach(btn => {
            btn.addEventListener('click', (e) => {
              const id = e.currentTarget.getAttribute('data-id');
@@ -969,7 +978,6 @@
         });
       } 
       else if (this._activeTab === 'add') {
-        // Toggle chi tiết phụ
         const toggleBtn = this.card.querySelector('#toggle-details');
         const detailContent = this.card.querySelector('#details-content');
         if (toggleBtn && detailContent) {
@@ -984,7 +992,6 @@
            });
         }
         
-        // Xử lý Submit
         const form = this.card.querySelector('#add-order-form');
         if (form) {
            form.addEventListener('submit', (e) => this.handleAddSubmit(e));
