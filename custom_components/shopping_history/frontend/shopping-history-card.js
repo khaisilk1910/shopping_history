@@ -382,9 +382,7 @@
       this._hass = hass;
       
       if (!oldHass) {
-        // [FIX TRỌNG TÂM] Ép thẻ vẽ bộ khung HTML ngay lập tức khi chưa có Data
         this.updateView(); 
-        
         if (!this._isScanning) {
             this._isScanning = true;
             this.performFullScan().finally(() => { this._isScanning = false; });
@@ -558,7 +556,6 @@
       
       this._historyPage = 1;
 
-      // [FIX TRỌNG TÂM] Phải bắt thẻ render dù Profile null, tuyệt đối không được return chay
       if (!this._currentProfile || !this._profilesData[this._currentProfile]) { 
           this.updateView(); 
           return; 
@@ -943,13 +940,12 @@
       const nextOpacity = pIdx < this._profileNames.length - 1 ? 0.8 : 0.2;
       const nextPointer = pIdx < this._profileNames.length - 1 ? 'auto' : 'none';
 
-      // [FIX] Cập nhật mảng Chọn Hồ sơ an toàn hơn
       let topBarHtml = `
         <div class="top-bar fade-in">
             <div class="profile-selector">
                 <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
-                <div style="flex:1; display:flex; align-items:center; justify-content:center; gap: 6px;">
-                    <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px;"></ha-icon>
+                <div class="profile-info-wrapper">
+                    <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
                     <select id="profile-select">
                         ${this._profileNames.length > 0 
                             ? this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')
@@ -961,7 +957,7 @@
             </div>
             
             <div class="tab search-tab-btn ${tabSearchClass}" data-target="search" title="Tra cứu & Bảo hành">
-                <ha-icon icon="mdi:magnify"></ha-icon>
+                <ha-icon icon="mdi:magnify" style="flex-shrink: 0;"></ha-icon>
                 <span class="st-text">Tra cứu</span>
             </div>
         </div>
@@ -1241,18 +1237,19 @@
           .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
 
-          /* CSS TOP BAR */
-          .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; }
-          .profile-selector { flex: 1; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 12px; border: 1px solid var(--glass-border); margin: 0;}
-          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(14px, 4vw, 16px); text-align: center; flex: 1; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
+          .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; width: 100%; box-sizing: border-box;}
+          .profile-selector { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 8px; border: 1px solid var(--glass-border); margin: 0;}
+          .profile-info-wrapper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; }
+          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
           .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
-          .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px;}
+          .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px; flex-shrink: 0;}
           .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
           
-          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px);}
+          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
           .search-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
           .search-tab-btn:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
-          @media (max-width: 380px) { .st-text { display: none; } .search-tab-btn { padding: 0 12px; } }
+          
+          @media (max-width: 420px) { .st-text { display: none; } .search-tab-btn { padding: 0 10px; } }
 
           /* TAB CHÍNH */
           .tabs { display: flex; gap: 8px; margin-bottom: 12px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); flex-shrink: 0;}
@@ -1360,10 +1357,13 @@
           .form-title { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
           .form-row { margin-bottom: 12px; }
           .form-row.split { display: flex; gap: 12px; }
-          .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1;}
+          
+          /* [FIX] Thêm min-width: 0 và thiết lập giới hạn cho input/select */
+          .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
           .f-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
-          .f-group input, .f-group select { background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
+          .f-group input, .f-group select { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
           .f-group input:focus, .f-group select:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          
           input::-webkit-calendar-picker-indicator { opacity: 0.5; filter: invert(0.8); cursor: pointer; }
           input:hover::-webkit-calendar-picker-indicator { opacity: 1; }
           .f-group select option { background: var(--option-bg); color: var(--text-main); }
