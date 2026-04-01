@@ -342,21 +342,20 @@
       this._availableYears = [];
       this._availableMonths = []; 
       
-      this._allProfileItems = []; // Lưu toàn bộ data của profile hiện tại cho Tra cứu
+      this._allProfileItems = []; 
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       
       this._activeTab = 'history'; 
       this._searchKeyword = '';
-      this._warrantyDays = 30; // Mặc định tìm các đơn còn BH dưới 30 ngày
+      this._warrantyDays = 30; 
 
-      // Phân trang
       this._itemsPerPage = 10;
       this._historyPage = 1;
       this._searchPage = 1;
       this._warrantyPage = 1;
 
-      this._entryIds = {}; // Map lưu entity_id -> config_entry_id
+      this._entryIds = {}; 
       
       this._uniqueCategories = new Set();
       this._uniquePlaces = new Set();
@@ -383,6 +382,9 @@
       this._hass = hass;
       
       if (!oldHass) {
+        // [FIX TRỌNG TÂM] Ép thẻ vẽ bộ khung HTML ngay lập tức khi chưa có Data
+        this.updateView(); 
+        
         if (!this._isScanning) {
             this._isScanning = true;
             this.performFullScan().finally(() => { this._isScanning = false; });
@@ -546,7 +548,7 @@
     }
 
     updateData() {
-      if (!this._hass || !this._currentProfile) return;
+      if (!this._hass) return;
 
       this._items = [];
       this._allProfileItems = [];
@@ -554,13 +556,16 @@
       this._availableMonths = [];
       this._expandedOrderId = null; 
       
-      // Reset phân trang khi đổi năm/tháng
       this._historyPage = 1;
 
+      // [FIX TRỌNG TÂM] Phải bắt thẻ render dù Profile null, tuyệt đối không được return chay
+      if (!this._currentProfile || !this._profilesData[this._currentProfile]) { 
+          this.updateView(); 
+          return; 
+      }
+      
       const currentProf = this._profilesData[this._currentProfile];
-      if (!currentProf) { this.updateView(); return; }
 
-      // Thu thập toàn bộ items của profile để dùng cho Tìm kiếm / Tra cứu
       Object.values(currentProf.map).forEach(eid => {
           const state = this._hass.states[eid];
           if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
@@ -569,7 +574,6 @@
       });
       this._allProfileItems.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
 
-      // Thu thập items cho năm được chọn (Tab Lịch sử)
       const yearEid = currentProf.map[this._selectedYear];
       if (!yearEid) { this.updateView(); return; }
 
@@ -630,7 +634,7 @@
 
     switchTab(tabName) {
       this._activeTab = tabName;
-      this._expandedOrderId = null; // Reset mở rộng khi đổi tab
+      this._expandedOrderId = null; 
       this._historyPage = 1;
       this._searchPage = 1;
       this._warrantyPage = 1;
@@ -714,10 +718,9 @@
       }
     }
 
-    // --- Hàm Helper Render Phân Trang ---
     renderPagination(currentPage, totalItems, type) {
         const totalPages = Math.ceil(totalItems / this._itemsPerPage);
-        if (totalPages <= 1) return ''; // Không hiện phân trang nếu chỉ có 1 trang
+        if (totalPages <= 1) return ''; 
 
         return `
           <div class="pagination-container">
@@ -730,7 +733,6 @@
         `;
     }
 
-    // --- Hàm Helper Render Dòng Bảng ---
     renderTableRows(itemsArray, isSearchMode = false) {
        if (itemsArray.length === 0) return `<div style="text-align:center; padding: 20px; color: var(--text-dim);">Không có đơn hàng nào.</div>`;
        
@@ -740,7 +742,7 @@
           
           let dateStr = '';
           if (isSearchMode) {
-              dateStr = formatDate(item.ngay_mua); // Đầy đủ DD/MM/YYYY
+              dateStr = formatDate(item.ngay_mua); 
           } else {
               const p = formatDate(item.ngay_mua).split('/');
               dateStr = p.length >= 2 ? `${p[0]}/${p[1]}` : formatDate(item.ngay_mua);
@@ -842,7 +844,6 @@
       this.card.style.padding = "clamp(12px, 3vw, 16px)";
       this.card.style.overflow = "hidden";
       
-      // Setup Flexbox cho thẻ để tận dụng được height
       this.card.style.height = `${cardHeight}px`;
       this.card.style.display = 'flex';
       this.card.style.flexDirection = 'column';
@@ -932,7 +933,6 @@
 
       const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
 
-      // Khởi tạo các Class active cho Tab
       const tabHistoryClass = this._activeTab === 'history' ? 'active' : '';
       const tabSearchClass = this._activeTab === 'search' ? 'active' : '';
       const tabAddClass = this._activeTab === 'add' ? 'active' : '';
@@ -943,21 +943,22 @@
       const nextOpacity = pIdx < this._profileNames.length - 1 ? 0.8 : 0.2;
       const nextPointer = pIdx < this._profileNames.length - 1 ? 'auto' : 'none';
 
-      // --- RENDER TOP BAR MỚI (Profile Selector + Nút Tra Cứu) ---
+      // [FIX] Cập nhật mảng Chọn Hồ sơ an toàn hơn
       let topBarHtml = `
         <div class="top-bar fade-in">
-            ${this._profileNames.length > 0 ? `
             <div class="profile-selector">
                 <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
                 <div style="flex:1; display:flex; align-items:center; justify-content:center; gap: 6px;">
                     <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px;"></ha-icon>
                     <select id="profile-select">
-                        ${this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')}
+                        ${this._profileNames.length > 0 
+                            ? this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')
+                            : `<option value="">Chưa có dữ liệu</option>`
+                        }
                     </select>
                 </div>
                 <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
             </div>
-            ` : '<div style="flex:1;"></div>'}
             
             <div class="tab search-tab-btn ${tabSearchClass}" data-target="search" title="Tra cứu & Bảo hành">
                 <ha-icon icon="mdi:magnify"></ha-icon>
@@ -968,7 +969,6 @@
 
       let contentHtml = '';
 
-      // --- RENDER TAB LỊCH SỬ ---
       if (this._activeTab === 'history') {
         
         const yIdx = this._availableYears.indexOf(this._selectedYear);
@@ -981,7 +981,6 @@
         const mPrevDisabled = mIdx <= 0 ? 'disabled' : '';
         const mNextDisabled = mIdx >= mArr.length - 1 ? 'disabled' : '';
 
-        // Xử lý Cắt trang Lịch sử
         const startIdx = (this._historyPage - 1) * this._itemsPerPage;
         const currentHistoryItems = this._items.slice(startIdx, startIdx + this._itemsPerPage);
 
@@ -1039,7 +1038,6 @@
           </div>
         `;
       } 
-      // --- RENDER TAB TRA CỨU ---
       else if (this._activeTab === 'search') {
         
         let keywordResults = [];
@@ -1061,9 +1059,8 @@
                 warrantyResults.push(item);
             }
         });
-        warrantyResults.sort((a, b) => a._daysLeft - b._daysLeft); // Gần hết hạn lên đầu
+        warrantyResults.sort((a, b) => a._daysLeft - b._daysLeft); 
 
-        // Cắt trang Tìm kiếm & Bảo hành
         const startSearch = (this._searchPage - 1) * this._itemsPerPage;
         const currentSearchItems = keywordResults.slice(startSearch, startSearch + this._itemsPerPage);
 
@@ -1114,7 +1111,6 @@
           </div>
         `;
       }
-      // --- RENDER TAB THÊM MỚI ---
       else if (this._activeTab === 'add') {
         const catOptions = Array.from(this._uniqueCategories).sort().map(c => `<option value="${c}">`).join('');
         const placeOptions = Array.from(this._uniquePlaces).sort().map(p => `<option value="${p}">`).join('');
@@ -1125,7 +1121,7 @@
         contentHtml = `
           <div class="add-tab-wrapper fade-in">
           <form id="add-order-form">
-            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${this._currentProfile || 'Mặc định'}</div>
+            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${this._currentProfile || 'Hồ sơ mặc định'}</div>
             
             <datalist id="cat-list">${catOptions}</datalist>
             <datalist id="place-list">${placeOptions}</datalist>
@@ -1283,7 +1279,6 @@
           .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
-          /* Loại bỏ scroll vì đã phân trang */
           .table-wrapper { flex: 1; overflow: hidden; } 
 
           .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
@@ -1314,7 +1309,6 @@
           .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px; padding: 4px;}
           .btn-delete:hover { opacity: 1; transform: scale(1.1);}
 
-          /* CSS CHI TIẾT ĐÃ THU GỌN LẠI */
           .row-details { background: rgba(0,0,0,0.2); padding: 6px 10px; color: var(--text-main); border-top: 1px dashed var(--glass-border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
           .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
           .d-item { display: flex; flex-direction: column; }
@@ -1323,7 +1317,6 @@
           .slide-down { animation: slideDownFast 0.2s ease-out forwards; transform-origin: top; }
           @keyframes slideDownFast { from { opacity: 0; transform: scaleY(0.9); } to { opacity: 1; transform: scaleY(1); } }
 
-          /* CSS PHÂN TRANG (PAGINATION) */
           .pagination-container { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 6px; border-top: 1px solid var(--glass-border); background: rgba(0,0,0,0.15); flex-shrink: 0;}
           .page-btn { cursor: pointer; color: var(--text-main); opacity: 0.6; transition: 0.2s; font-size: 24px; padding: 2px; border-radius: 4px; }
           .page-btn:hover:not(.disabled) { opacity: 1; color: var(--accent); background: rgba(255,255,255,0.05); }
@@ -1411,12 +1404,11 @@
 
       this.card.innerHTML = html;
 
-      // Listeners cho Pagination
       this.card.querySelectorAll('.page-btn:not(.disabled)').forEach(btn => {
          btn.addEventListener('click', (e) => {
              const type = e.currentTarget.getAttribute('data-type');
              const newPage = parseInt(e.currentTarget.getAttribute('data-page'));
-             this._expandedOrderId = null; // Đóng tab chi tiết khi chuyển trang
+             this._expandedOrderId = null; 
 
              if (type === 'history') this._historyPage = newPage;
              if (type === 'search') this._searchPage = newPage;
@@ -1426,7 +1418,6 @@
          });
       });
 
-      // Event Listeners cho Tabs & Profile Nav
       this.card.querySelectorAll('.tab').forEach(t => {
         t.addEventListener('click', (e) => this.switchTab(e.currentTarget.getAttribute('data-target')));
       });
@@ -1438,7 +1429,6 @@
       if (prevProf) prevProf.addEventListener('click', () => { let idx = this._profileNames.indexOf(this._currentProfile); if (idx > 0) { this._currentProfile = this._profileNames[idx - 1]; this.updateData(); } });
       if (nextProf) nextProf.addEventListener('click', () => { let idx = this._profileNames.indexOf(this._currentProfile); if (idx < this._profileNames.length - 1) { this._currentProfile = this._profileNames[idx + 1]; this.updateData(); } });
 
-      // Event Listeners chung cho Mở rộng Dòng
       this.card.querySelectorAll('.t-row').forEach(row => {
           row.addEventListener('click', (e) => {
               const id = parseInt(e.currentTarget.getAttribute('data-id'));
@@ -1448,7 +1438,6 @@
           });
       });
 
-      // Event Listeners theo từng Tab
       if (this._activeTab === 'history') {
         const ySel = this.card.querySelector('#year-select');
         const mSel = this.card.querySelector('#month-select');
@@ -1481,17 +1470,15 @@
         if (btnConfirmDel) btnConfirmDel.addEventListener('click', () => this.executeDelete());
       } 
       else if (this._activeTab === 'search') {
-          // Xử lý Input Search
           const searchInput = this.card.querySelector('#search-input');
           const clearSearch = this.card.querySelector('#clear-search');
           
           if (searchInput) {
               searchInput.addEventListener('input', (e) => {
                   this._searchKeyword = e.target.value;
-                  this._searchPage = 1; // Reset page khi tìm kiếm
+                  this._searchPage = 1; 
                   this.updateView(); 
               });
-              // Focus lại input sau khi render (nếu đang type)
               setTimeout(() => {
                   const input = this.card.querySelector('#search-input');
                   if(input && this._searchKeyword) {
@@ -1502,11 +1489,10 @@
           }
           if (clearSearch) clearSearch.addEventListener('click', () => { this._searchKeyword = ''; this._searchPage = 1; this.updateView(); });
 
-          // Xử lý Slider Bảo hành
           const wSlider = this.card.querySelector('#warranty-slider');
           if (wSlider) wSlider.addEventListener('input', (e) => {
               this._warrantyDays = parseInt(e.target.value);
-              this._warrantyPage = 1; // Reset page khi thay đổi hạn BH
+              this._warrantyPage = 1; 
               this.updateView();
           });
       }
