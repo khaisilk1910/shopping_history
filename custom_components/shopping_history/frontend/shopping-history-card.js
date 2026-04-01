@@ -7,7 +7,7 @@
   const formatDate = (dateString) => {
     if (!dateString) return '--/--/----';
     const parts = dateString.split('-');
-    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`; 
     return dateString;
   };
 
@@ -58,7 +58,7 @@
           .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; width: 100%;}
           .row-col { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; width: 100%;}
           .row:last-child, .row-col:last-child { margin-bottom: 0; }
-          .label { font-weight: 500; color: var(--primary-text-color); font-size: 14px; }
+          .label { font-weight: 500; color: var(--primary-text-color); font-size: 14px; min-width: 120px;}
           .input-group { display: flex; align-items: center; gap: 12px; }
           input[type=color] { cursor: pointer; border: 1px solid var(--divider-color, #e0e0e0); border-radius: 6px; padding: 2px; width: 40px; height: 32px; background: transparent; }
           input[type=range] { flex-grow: 1; cursor: pointer; }
@@ -84,138 +84,61 @@
         </style>
 
         <div class="editor-container">
+          <div class="section"><div class="section-title no-collapse"><div class="title-left">⚙️ Cài đặt chung</div></div><div class="section-content"><div class="row-col"><span class="label">Tiêu đề thẻ</span><input type="text" id="title-input" class="custom-input config-trigger" value="${currentTitle}"></div><div class="row-col"><span class="label">Icon</span><input type="text" id="icon-input" class="custom-input config-trigger" value="${currentIcon}"></div><div class="row"><span class="label">Chiều cao thẻ (px)</span><input type="range" id="card_height" class="config-trigger" min="600" max="1000" step="50"><span class="val-badge" id="card_height_val"></span></div></div></div>
           
           <div class="section">
-            <div class="section-title no-collapse">
-              <div class="title-left">⚙️ Cài đặt chung</div>
-            </div>
-            <div class="section-content">
-              <div class="row-col">
-                <span class="label">Tiêu đề thẻ chính (Tuỳ chọn)</span>
-                <input type="text" id="title-input" class="custom-input config-trigger" placeholder="VD: Quản Lý Mua Sắm" value="${currentTitle}">
-              </div>
-              <div class="row-col">
-                <span class="label">Icon hoặc Emoji (Tuỳ chọn)</span>
-                <input type="text" id="icon-input" class="custom-input config-trigger" placeholder="VD: mdi:cart-outline hoặc 🛒" value="${currentIcon}">
-              </div>
-            </div>
-          </div>
-
-          <div class="section">
-            <div class="section-title no-collapse">
-              <div class="title-left">🎨 Nền (Background)</div>
-            </div>
-            <div class="section-content">
-              <div class="row">
-                <span class="label" style="min-width: 120px;">Loại nền</span>
-                <select id="bg_type" class="ha-select config-trigger">
-                  <option value="solid">Màu đơn sắc (Solid)</option>
-                  <option value="gradient">Màu dải (Gradient)</option>
-                </select>
-              </div>
-              <div class="row">
-                <span class="label" style="min-width: 120px;">Độ trong suốt (%)</span>
-                <input type="range" id="bg_opacity" class="config-trigger" min="0" max="100">
-                <span class="val-badge" id="bg_opacity_val"></span>
-              </div>
-
-              <div id="solid_settings">
-                <div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;">
-                  <span class="label">Màu nền</span>
-                  <div class="input-group"><input type="color" id="bg_color" class="config-trigger"><span class="val-badge" id="bg_color_val"></span></div>
-                </div>
-              </div>
-
-              <div id="gradient_settings" style="display:none;">
-                <div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;">
-                  <span class="label" style="min-width: 120px;">Mẫu Gradient</span>
-                  <select id="bg_gradient_preset" class="ha-select config-trigger">
-                    <option value="linear-gradient(135deg, rgba(15,23,42,1), rgba(30,41,59,1))">🌙 Kính mờ Tối (Mặc định)</option>
-                    <option value="linear-gradient(135deg, #f0f4f8, #d9e2ec)">☀️ Kính mờ Sáng</option>
-                    <option value="linear-gradient(135deg, #141e30, #243b55)">🌌 Royal Night</option>
-                    <option value="linear-gradient(135deg, #0f2027, #203a43, #2c5364)">🌊 Deep Ocean</option>
-                    <option value="linear-gradient(135deg, #232526, #414345)">🏙️ Midnight City</option>
-                    <option value="linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))">🪟 Glassmorphism Thuần</option>
-                    <option value="linear-gradient(135deg, #667eea, #764ba2)">💜 Plum Plate</option>
-                    <option value="linear-gradient(135deg, #11998e, #38ef7d)">🌿 Neon Life</option>
-                    <option value="linear-gradient(135deg, #2b5876, #4e4376)">🌠 Starry Night</option>
-                    <option value="custom">✍️ Tùy chỉnh (Custom)</option>
-                  </select>
-                </div>
-
-                <div id="custom_gradient_row" style="display:none; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--divider-color, #e0e0e0);">
-                  <div class="row" style="width: 100%;">
-                    <span class="label">Màu 1</span>
-                    <div class="input-group"><input type="color" id="bg_gradient_color1" class="config-trigger"><span class="val-badge" id="bg_gradient_color1_val"></span></div>
+              <div class="section-title"><div class="title-left">🎨 Nền (Background)</div><span class="section-icon">▼</span></div>
+              <div class="section-content">
+                  <div class="row"><span class="label">Loại nền</span><select id="bg_type" class="ha-select config-trigger"><option value="solid">Màu đơn sắc (Solid)</option><option value="gradient">Màu dải (Gradient)</option></select></div>
+                  <div class="row"><span class="label">Độ trong suốt (%)</span><input type="range" id="bg_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="bg_opacity_val"></span></div>
+                  
+                  <div id="solid_settings" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;">
+                      <div class="row"><span class="label">Màu nền</span><div class="input-group"><input type="color" id="bg_color" class="config-trigger"><span class="val-badge" id="bg_color_val"></span></div></div>
                   </div>
-                  <div class="row" style="width: 100%;">
-                    <span class="label">Màu 2</span>
-                    <div class="input-group"><input type="color" id="bg_gradient_color2" class="config-trigger"><span class="val-badge" id="bg_gradient_color2_val"></span></div>
+                  
+                  <div id="gradient_settings" style="display:none;">
+                      <div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;">
+                          <span class="label">Mẫu Gradient</span>
+                          <select id="bg_gradient_preset" class="ha-select config-trigger">
+                              <option value="linear-gradient(135deg, #f0f4f8, #d9e2ec)">☀️ Sáng mặc định (Màu zin)</option>
+                              <option value="linear-gradient(135deg, #1e293b, #0f172a)">🌙 Tối mặc định</option>
+                              <option value="linear-gradient(135deg, #141e30, #243b55)">🌌 Royal Night</option>
+                              <option value="linear-gradient(135deg, #0f2027, #203a43, #2c5364)">🌊 Deep Ocean</option>
+                              <option value="linear-gradient(135deg, #232526, #414345)">🏙️ Midnight City</option>
+                              <option value="linear-gradient(135deg, #1a1a1a, #000000)">⚫ Dark Elegance</option>
+                              <option value="linear-gradient(135deg, #ff0099, #493240)">🔮 Cosmic Fusion</option>
+                              <option value="linear-gradient(135deg, #ff512f, #dd2476)">🌅 Sunset Vibes</option>
+                              <option value="linear-gradient(135deg, #134e5e, #71b280)">🌲 Forest Mist</option>
+                              <option value="linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))">🪟 Glassmorphism</option>
+                              <option value="linear-gradient(135deg, #0f0c29, #302b63, #24243e)">🚀 Deep Space</option>
+                              <option value="linear-gradient(135deg, #667eea, #764ba2)">💜 Plum Plate</option>
+                              <option value="linear-gradient(135deg, #ff9a9e, #fecfef)">🌸 Cherry Blossom</option>
+                              <option value="linear-gradient(135deg, #f12711, #f5af19)">🔥 Fire Glow</option>
+                              <option value="linear-gradient(135deg, #11998e, #38ef7d)">🌿 Neon Life</option>
+                              <option value="linear-gradient(135deg, #00c6ff, #0072ff)">❄️ Winter Sky</option>
+                              <option value="linear-gradient(135deg, #f6d365, #fda085)">🍑 Sunrise Peach</option>
+                              <option value="linear-gradient(135deg, #9D50BB, #6E48AA)">💎 Amethyst</option>
+                              <option value="linear-gradient(135deg, #2b5876, #4e4376)">🌠 Starry Night</option>
+                              <option value="linear-gradient(135deg, #ff758c, #ff7eb3)">🍉 Sweet Pink</option>
+                              <option value="linear-gradient(135deg, #4facfe, #00f2fe)">🏝️ Tropical Blue</option>
+                              <option value="linear-gradient(135deg, #870000, #190a05)">🍷 Blood Moon</option>
+                              <option value="custom">✍️ Tùy chỉnh (Custom)</option>
+                          </select>
+                      </div>
+                      <div id="custom_gradient_row" style="display:none; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--divider-color, #e0e0e0);">
+                          <div class="row" style="width:100%;"><span class="label">Màu 1</span><div class="input-group"><input type="color" id="bg_gradient_color1" class="config-trigger"><span class="val-badge" id="bg_gradient_color1_val"></span></div></div>
+                          <div class="row" style="width:100%;"><span class="label">Màu 2</span><div class="input-group"><input type="color" id="bg_gradient_color2" class="config-trigger"><span class="val-badge" id="bg_gradient_color2_val"></span></div></div>
+                          <div class="row" style="width:100%;"><span class="label">Góc độ (°)</span><input type="range" id="bg_gradient_angle" class="config-trigger" min="0" max="360" step="1"><span class="val-badge" id="bg_gradient_angle_val"></span></div>
+                      </div>
                   </div>
-                  <div class="row" style="width: 100%;">
-                    <span class="label" style="min-width: 120px;">Góc độ (°)</span>
-                    <input type="range" id="bg_gradient_angle" class="config-trigger" min="0" max="360" step="1">
-                    <span class="val-badge" id="bg_gradient_angle_val"></span>
-                  </div>
-                </div>
               </div>
-            </div>
           </div>
 
-          <div class="section collapsed">
-            <div class="section-title">
-              <div class="title-left">🖋️ Nội dung & Màu sắc</div>
-              <div class="title-right">
-                <input type="checkbox" id="auto_contrast" class="config-trigger" style="transform: scale(1.2); cursor: pointer;" title="Tự động tương phản màu theo Nền">
-                <span class="section-icon">▼</span>
-              </div>
-            </div>
-            <div class="section-content">
-              <div id="custom_colors_settings">
-                <div class="row"><span class="label">Màu chữ chính</span><div class="input-group"><input type="color" id="textColor" class="config-trigger"></div></div>
-                <div class="row"><span class="label">Màu Nhấn (Accent)</span><div class="input-group"><input type="color" id="accentColor" class="config-trigger"></div></div>
-                <div class="row"><span class="label">Màu Tiền / Nổi bật</span><div class="input-group"><input type="color" id="moneyColor" class="config-trigger"></div></div>
-                <div class="row"><span class="label">Màu Nền các khối nhỏ</span><div class="input-group"><input type="color" id="blockBg" class="config-trigger"></div></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="section collapsed">
-            <div class="section-title">
-              <div class="title-left">🔲 Viền (Border)</div>
-              <div class="title-right">
-                <input type="checkbox" id="border_enable" class="config-trigger" style="transform: scale(1.2); cursor: pointer;" title="Bật/Tắt viền">
-                <span class="section-icon">▼</span>
-              </div>
-            </div>
-            <div class="section-content">
-              <div id="border_settings">
-                <div class="row"><span class="label">Màu viền</span><div class="input-group"><input type="color" id="border_color" class="config-trigger"><span class="val-badge" id="border_color_val"></span></div></div>
-                <div class="row"><span class="label" style="min-width: 120px;">Độ dày viền (px)</span><input type="range" id="border_width" class="config-trigger" min="0" max="10" step="1"><span class="val-badge" id="border_width_val"></span></div>
-                <div class="row"><span class="label" style="min-width: 120px;">Độ trong suốt (%)</span><input type="range" id="border_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="border_opacity_val"></span></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="section collapsed">
-            <div class="section-title">
-              <div class="title-left">☁️ Đổ bóng (Shadow)</div>
-              <div class="title-right">
-                <input type="checkbox" id="shadow_enable" class="config-trigger" style="transform: scale(1.2); cursor: pointer;" title="Bật/Tắt hiệu ứng đổ bóng">
-                <span class="section-icon">▼</span>
-              </div>
-            </div>
-            <div class="section-content">
-              <div id="shadow_settings">
-                <div class="row"><span class="label">Màu đổ bóng</span><div class="input-group"><input type="color" id="shadow_color" class="config-trigger"><span class="val-badge" id="shadow_color_val"></span></div></div>
-                <div class="row"><span class="label" style="min-width: 120px;">Độ trong suốt (%)</span><input type="range" id="shadow_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_opacity_val"></span></div>
-                <div class="row"><span class="label" style="min-width: 120px;">Độ nhòe (Blur)</span><input type="range" id="shadow_blur" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_blur_val"></span></div>
-                <div class="row"><span class="label" style="min-width: 120px;">Khoảng cách (X)</span><input type="range" id="shadow_offset_x" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_x_val"></span></div>
-                <div class="row"><span class="label" style="min-width: 120px;">Khoảng cách (Y)</span><input type="range" id="shadow_offset_y" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_y_val"></span></div>
-              </div>
-            </div>
-          </div>
-
+          <div class="section collapsed"><div class="section-title"><div class="title-left">🖋️ Nội dung & Màu sắc</div><div class="title-right"><input type="checkbox" id="auto_contrast" class="config-trigger" title="Tự động tương phản"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="custom_colors_settings"><div class="row"><span class="label">Màu chữ</span><div class="input-group"><input type="color" id="textColor" class="config-trigger"><span class="val-badge" id="textColor_val"></span></div></div><div class="row"><span class="label">Màu Nhấn</span><div class="input-group"><input type="color" id="accentColor" class="config-trigger"><span class="val-badge" id="accentColor_val"></span></div></div><div class="row"><span class="label">Màu Tiền</span><div class="input-group"><input type="color" id="moneyColor" class="config-trigger"><span class="val-badge" id="moneyColor_val"></span></div></div><div class="row"><span class="label">Màu Nền khối</span><div class="input-group"><input type="color" id="blockBg" class="config-trigger"><span class="val-badge" id="blockBg_val"></span></div></div></div></div></div>
+          
+          <div class="section collapsed"><div class="section-title"><div class="title-left">🔲 Viền (Border)</div><div class="title-right"><input type="checkbox" id="border_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="border_settings"><div class="row"><span class="label">Màu viền</span><div class="input-group"><input type="color" id="border_color" class="config-trigger"><span class="val-badge" id="border_color_val"></span></div></div><div class="row"><span class="label">Độ dày (px)</span><input type="range" id="border_width" class="config-trigger" min="0" max="10" step="1"><span class="val-badge" id="border_width_val"></span></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="border_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="border_opacity_val"></span></div></div></div></div>
+          
+          <div class="section collapsed"><div class="section-title"><div class="title-left">☁️ Đổ bóng (Shadow)</div><div class="title-right"><input type="checkbox" id="shadow_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="shadow_settings"><div class="row"><span class="label">Màu bóng</span><div class="input-group"><input type="color" id="shadow_color" class="config-trigger"><span class="val-badge" id="shadow_color_val"></span></div></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="shadow_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_opacity_val"></span></div><div class="row"><span class="label">Độ nhòe</span><input type="range" id="shadow_blur" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_blur_val"></span></div><div class="row"><span class="label">Offset X</span><input type="range" id="shadow_offset_x" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_x_val"></span></div><div class="row"><span class="label">Offset Y</span><input type="range" id="shadow_offset_y" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_y_val"></span></div></div></div></div>
         </div>
       `;
 
@@ -223,26 +146,24 @@
       this.addListeners();
     }
 
+    get _card_height() { return this._config?.card_height !== undefined ? this._config.card_height : 600; }
     get _bg_type() { return this._config?.bg_type || 'gradient'; }
-    get _bg_color() { return this._config?.bg_color || '#0f172a'; }
-    get _bg_opacity() { return this._config?.bg_opacity !== undefined ? this._config.bg_opacity : 60; }
-    get _bg_gradient_preset() { return this._config?.bg_gradient_preset || 'linear-gradient(135deg, rgba(15,23,42,1), rgba(30,41,59,1))'; }
-    get _bg_gradient_color1() { return this._config?.bg_gradient_color1 || '#0f172a'; }
-    get _bg_gradient_color2() { return this._config?.bg_gradient_color2 || '#1e293b'; }
+    get _bg_color() { return this._config?.bg_color || '#1e293b'; }
+    get _bg_opacity() { return this._config?.bg_opacity !== undefined ? this._config.bg_opacity : 70; }
+    get _bg_gradient_preset() { return this._config?.bg_gradient_preset || 'linear-gradient(135deg, #2b5876, #4e4376)'; }
+    get _bg_gradient_color1() { return this._config?.bg_gradient_color1 || '#1e293b'; }
+    get _bg_gradient_color2() { return this._config?.bg_gradient_color2 || '#0f172a'; }
     get _bg_gradient_angle() { return this._config?.bg_gradient_angle !== undefined ? this._config.bg_gradient_angle : 135; }
-
-    get _border_enable() { return this._config?.border_enable !== undefined ? this._config.border_enable : true; }
+    get _border_enable() { return this._config?.border_enable !== undefined ? this._config.border_enable : false; }
     get _border_color() { return this._config?.border_color || '#ffffff'; }
     get _border_width() { return this._config?.border_width !== undefined ? this._config.border_width : 1; }
     get _border_opacity() { return this._config?.border_opacity !== undefined ? this._config.border_opacity : 10; }
-    
-    get _shadow_enable() { return this._config?.shadow_enable !== undefined ? this._config.shadow_enable : true; }
+    get _shadow_enable() { return this._config?.shadow_enable !== undefined ? this._config.shadow_enable : false; }
     get _shadow_color() { return this._config?.shadow_color || '#000000'; }
     get _shadow_opacity() { return this._config?.shadow_opacity !== undefined ? this._config.shadow_opacity : 20; }
     get _shadow_blur() { return this._config?.shadow_blur !== undefined ? this._config.shadow_blur : 32; }
     get _shadow_offset_x() { return this._config?.shadow_offset_x !== undefined ? this._config.shadow_offset_x : 0; }
     get _shadow_offset_y() { return this._config?.shadow_offset_y !== undefined ? this._config.shadow_offset_y : 8; }
-
     get _auto_contrast() { return this._config?.auto_contrast !== undefined ? this._config.auto_contrast : true; }
     get _textColor() { return this._config?.textColor || '#f8fafc'; }
     get _accentColor() { return this._config?.accentColor || '#0ea5e9'; }
@@ -252,10 +173,14 @@
     updateUI() {
       if (!this.querySelector('#bg_type')) return;
       
-      this.querySelector('#bg_type').value = this._bg_type;
-      this.querySelector('#bg_opacity').value = this._bg_opacity;
-      this.querySelector('#bg_opacity_val').textContent = this._bg_opacity + '%';
+      this.querySelector('#card_height').value = this._card_height;
+      if(this.querySelector('#card_height_val')) this.querySelector('#card_height_val').textContent = this._card_height + 'px';
 
+      this.querySelector('#bg_type').value = this._bg_type;
+      
+      this.querySelector('#bg_opacity').value = this._bg_opacity;
+      if(this.querySelector('#bg_opacity_val')) this.querySelector('#bg_opacity_val').textContent = this._bg_opacity + '%';
+      
       if (this._bg_type === 'gradient') {
         this.querySelector('#solid_settings').style.display = 'none';
         this.querySelector('#gradient_settings').style.display = 'block';
@@ -263,11 +188,11 @@
         this.querySelector('#solid_settings').style.display = 'block';
         this.querySelector('#gradient_settings').style.display = 'none';
       }
-
-      this.querySelector('#bg_color').value = this._bg_color;
-      this.querySelector('#bg_color_val').textContent = this._bg_color.toUpperCase();
-      this.querySelector('#bg_gradient_preset').value = this._bg_gradient_preset;
       
+      this.querySelector('#bg_color').value = this._bg_color;
+      if(this.querySelector('#bg_color_val')) this.querySelector('#bg_color_val').textContent = this._bg_color.toUpperCase();
+
+      this.querySelector('#bg_gradient_preset').value = this._bg_gradient_preset;
       if (this._bg_gradient_preset === 'custom') {
         this.querySelector('#custom_gradient_row').style.display = 'flex';
       } else {
@@ -275,34 +200,44 @@
       }
       
       this.querySelector('#bg_gradient_color1').value = this._bg_gradient_color1;
-      this.querySelector('#bg_gradient_color1_val').textContent = this._bg_gradient_color1.toUpperCase();
+      if(this.querySelector('#bg_gradient_color1_val')) this.querySelector('#bg_gradient_color1_val').textContent = this._bg_gradient_color1.toUpperCase();
+      
       this.querySelector('#bg_gradient_color2').value = this._bg_gradient_color2;
-      this.querySelector('#bg_gradient_color2_val').textContent = this._bg_gradient_color2.toUpperCase();
+      if(this.querySelector('#bg_gradient_color2_val')) this.querySelector('#bg_gradient_color2_val').textContent = this._bg_gradient_color2.toUpperCase();
+      
       this.querySelector('#bg_gradient_angle').value = this._bg_gradient_angle;
-      this.querySelector('#bg_gradient_angle_val').textContent = this._bg_gradient_angle + '°';
+      if(this.querySelector('#bg_gradient_angle_val')) this.querySelector('#bg_gradient_angle_val').textContent = this._bg_gradient_angle + '°';
 
       const borderCheckbox = this.querySelector('#border_enable');
       if (borderCheckbox) borderCheckbox.checked = this._border_enable;
       this.querySelector('#border_settings').style.display = this._border_enable ? 'block' : 'none';
+      
       this.querySelector('#border_color').value = this._border_color;
-      this.querySelector('#border_color_val').textContent = this._border_color.toUpperCase();
+      if(this.querySelector('#border_color_val')) this.querySelector('#border_color_val').textContent = this._border_color.toUpperCase();
+      
       this.querySelector('#border_width').value = this._border_width;
-      this.querySelector('#border_width_val').textContent = this._border_width + 'px';
+      if(this.querySelector('#border_width_val')) this.querySelector('#border_width_val').textContent = this._border_width + 'px';
+      
       this.querySelector('#border_opacity').value = this._border_opacity;
-      this.querySelector('#border_opacity_val').textContent = this._border_opacity + '%';
+      if(this.querySelector('#border_opacity_val')) this.querySelector('#border_opacity_val').textContent = this._border_opacity + '%';
 
       this.querySelector('#shadow_enable').checked = this._shadow_enable;
       this.querySelector('#shadow_settings').style.display = this._shadow_enable ? 'block' : 'none';
+      
       this.querySelector('#shadow_color').value = this._shadow_color;
-      this.querySelector('#shadow_color_val').textContent = this._shadow_color.toUpperCase();
+      if(this.querySelector('#shadow_color_val')) this.querySelector('#shadow_color_val').textContent = this._shadow_color.toUpperCase();
+      
       this.querySelector('#shadow_opacity').value = this._shadow_opacity;
-      this.querySelector('#shadow_opacity_val').textContent = this._shadow_opacity + '%';
+      if(this.querySelector('#shadow_opacity_val')) this.querySelector('#shadow_opacity_val').textContent = this._shadow_opacity + '%';
+      
       this.querySelector('#shadow_blur').value = this._shadow_blur;
-      this.querySelector('#shadow_blur_val').textContent = this._shadow_blur + 'px';
+      if(this.querySelector('#shadow_blur_val')) this.querySelector('#shadow_blur_val').textContent = this._shadow_blur + 'px';
+      
       this.querySelector('#shadow_offset_x').value = this._shadow_offset_x;
-      this.querySelector('#shadow_offset_x_val').textContent = this._shadow_offset_x + 'px';
+      if(this.querySelector('#shadow_offset_x_val')) this.querySelector('#shadow_offset_x_val').textContent = this._shadow_offset_x + 'px';
+      
       this.querySelector('#shadow_offset_y').value = this._shadow_offset_y;
-      this.querySelector('#shadow_offset_y_val').textContent = this._shadow_offset_y + 'px';
+      if(this.querySelector('#shadow_offset_y_val')) this.querySelector('#shadow_offset_y_val').textContent = this._shadow_offset_y + 'px';
 
       this.querySelector('#auto_contrast').checked = this._auto_contrast;
       if (this._auto_contrast) {
@@ -312,11 +247,18 @@
           this.querySelector('#custom_colors_settings').style.opacity = '1';
           this.querySelector('#custom_colors_settings').style.pointerEvents = 'auto';
       }
-
+      
       this.querySelector('#textColor').value = this._textColor;
+      if(this.querySelector('#textColor_val')) this.querySelector('#textColor_val').textContent = this._textColor.toUpperCase();
+      
       this.querySelector('#accentColor').value = this._accentColor;
+      if(this.querySelector('#accentColor_val')) this.querySelector('#accentColor_val').textContent = this._accentColor.toUpperCase();
+      
       this.querySelector('#moneyColor').value = this._moneyColor;
+      if(this.querySelector('#moneyColor_val')) this.querySelector('#moneyColor_val').textContent = this._moneyColor.toUpperCase();
+      
       this.querySelector('#blockBg').value = this._blockBg;
+      if(this.querySelector('#blockBg_val')) this.querySelector('#blockBg_val').textContent = this._blockBg.toUpperCase();
     }
 
     addListeners() {
@@ -325,6 +267,7 @@
             ...this._config,
             title: this.querySelector('#title-input').value,
             icon: this.querySelector('#icon-input').value,
+            card_height: parseInt(this.querySelector('#card_height').value, 10),
             bg_type: this.querySelector('#bg_type').value,
             bg_color: this.querySelector('#bg_color').value,
             bg_opacity: parseInt(this.querySelector('#bg_opacity').value, 10),
@@ -370,7 +313,18 @@
   // ==========================================
   class ShoppingHistoryCard extends HTMLElement {
     static getConfigElement() { return document.createElement('shopping-history-editor'); }
-    static getStubConfig() { return { title: "Quản Lý Mua Sắm", icon: "mdi:cart-outline", bg_opacity: 60 }; }
+    static getStubConfig() { 
+      return { 
+        title: "Quản Lý Mua Sắm", 
+        icon: "mdi:cart-outline", 
+        card_height: 600,
+        bg_opacity: 70, 
+        bg_gradient_preset: 'linear-gradient(135deg, #2b5876, #4e4376)',
+        auto_contrast: true,
+        border_enable: false,
+        shadow_enable: false
+      }; 
+    }
 
     constructor() {
       super();
@@ -379,20 +333,42 @@
       
       const now = new Date();
       this._selectedYear = now.getFullYear();
-      this._selectedMonth = now.getMonth() + 1;
+      this._selectedMonth = 'all'; 
       
-      // Quản lý Profile (Hồ sơ)
-      this._profilesData = {}; // Cấu trúc: { "Tên hồ sơ": { years: Set(), map: { year: entity_id } } }
+      this._profilesData = {}; 
       this._profileNames = [];
       this._currentProfile = null;
       
       this._availableYears = [];
+      this._availableMonths = []; 
+      
+      this._allProfileItems = []; // Lưu toàn bộ data của profile hiện tại cho Tra cứu
       this._items = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       
       this._activeTab = 'history'; 
-      this._entryIds = {}; 
+      this._searchKeyword = '';
+      this._warrantyDays = 30; // Mặc định tìm các đơn còn BH dưới 30 ngày
+
+      // Phân trang
+      this._itemsPerPage = 10;
+      this._historyPage = 1;
+      this._searchPage = 1;
+      this._warrantyPage = 1;
+
+      this._entryIds = {}; // Map lưu entity_id -> config_entry_id
+      
       this._uniqueCategories = new Set();
+      this._uniquePlaces = new Set();
+      this._uniqueManufacturers = new Set();
+      
+      this._expandedOrderId = null; 
+      this._showDeleteModal = false;
+      this._itemToDelete = null;
+
+      this._configEntriesMap = {};
+      this._entityRegistryMap = {};
+      this._isScanning = false;
     }
 
     setConfig(config) {
@@ -407,125 +383,209 @@
       this._hass = hass;
       
       if (!oldHass) {
-        this.scanSensors();
-        this.updateData();
+        if (!this._isScanning) {
+            this._isScanning = true;
+            this.performFullScan().finally(() => { this._isScanning = false; });
+        }
       } else {
+        if (this._isScanning) return; 
+        
         let shouldUpdate = false;
+        
         const relevantSensors = Object.keys(hass.states).filter(k => 
             k.startsWith('sensor.') && 
             hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
             hass.states[k].attributes.nam !== undefined
         );
-        for (let eid of relevantSensors) {
-            if (oldHass.states[eid] !== hass.states[eid]) {
-                shouldUpdate = true;
-                break;
+        
+        const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
+            k.startsWith('sensor.') && 
+            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+            oldHass.states[k].attributes.nam !== undefined
+        );
+
+        if (relevantSensors.length !== oldRelevantSensors.length) {
+            shouldUpdate = true;
+        } else {
+            for (let eid of relevantSensors) {
+                if (oldHass.states[eid] !== hass.states[eid]) {
+                    shouldUpdate = true;
+                    break;
+                }
             }
         }
+        
         if (shouldUpdate) {
-            this.scanSensors();
-            this.updateData();
+            this._isScanning = true;
+            this.performFullScan().finally(() => { this._isScanning = false; });
         }
       }
     }
 
-    // Lấy config_entry_id ngầm qua API
-    async fetchEntryId(entityId) {
-      if (this._entryIds[entityId]) return; 
-      
-      if (this._hass.entities && this._hass.entities[entityId]) {
-         this._entryIds[entityId] = this._hass.entities[entityId].config_entry_id;
-         return;
-      }
-      
+    async getEntryId(entityId) {
+      if (this._entryIds[entityId]) return this._entryIds[entityId];
+
       try {
-        const result = await this._hass.callWS({
-          type: 'config/entity_registry/get',
-          entity_id: entityId
-        });
+        const result = await this._hass.callWS({ type: 'config/entity_registry/get', entity_id: entityId });
         if (result && result.config_entry_id) {
-          this._entryIds[entityId] = result.config_entry_id;
+            this._entryIds[entityId] = result.config_entry_id;
+            return result.config_entry_id;
         }
-      } catch (err) {
-        console.warn("Shopping History: Không thể lấy config_entry_id cho", entityId);
-      }
+      } catch (err) {}
+
+      return null;
     }
 
-    scanSensors() {
+    async performFullScan() {
       if (!this._hass) return;
-      
+
+      try {
+          const entries = await this._hass.callWS({ type: 'config_entries/get' });
+          this._configEntriesMap = {};
+          entries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
+
+          const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
+          this._entityRegistryMap = {};
+          entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
+      } catch (err) {
+          console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
+      }
+
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
         this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
         this._hass.states[eid].attributes.nam !== undefined
       );
 
-      this._profilesData = {}; 
+      this._uniqueCategories.clear();
+      this._uniquePlaces.clear();
+      this._uniqueManufacturers.clear();
+
+      const tempGroups = {};
 
       yearSensors.forEach(eid => {
         const state = this._hass.states[eid];
         const y = parseInt(state.attributes.nam);
         
-        if (!isNaN(y)) {
-            // Lọc tên Profile từ friendly_name (Cắt bỏ chữ "Năm YYYY" ở cuối nếu có)
-            let pName = state.attributes.friendly_name || eid;
-            pName = pName.replace(/\s*Năm\s*\d{4}$/i, '').trim();
-
-            if (!this._profilesData[pName]) {
-                this._profilesData[pName] = { years: new Set(), map: {} };
-            }
-            this._profilesData[pName].years.add(y);
-            this._profilesData[pName].map[y] = eid;
-            
-            this.fetchEntryId(eid); 
+        if (state.attributes.danh_sach_chi_tiet) {
+            state.attributes.danh_sach_chi_tiet.forEach(item => {
+                if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
+                if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
+                if (item.manufacturer) this._uniqueManufacturers.add(item.manufacturer.trim());
+            });
         }
+        
+        if (!isNaN(y)) {
+            let groupId = this._entityRegistryMap[eid] || 
+                          (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
+                          state.attributes.config_entry_id;
+
+            if (!groupId) {
+                let baseName = state.attributes.friendly_name || eid;
+                groupId = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+            }
+
+            if (!tempGroups[groupId]) { 
+                tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
+            }
+            tempGroups[groupId].years.add(y);
+            tempGroups[groupId].map[y] = eid;
+            
+            let pName = state.attributes.friendly_name || eid;
+            pName = pName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+            tempGroups[groupId].displayNames.push(pName);
+
+            if(groupId && !this._entryIds[eid]) {
+                this._entryIds[eid] = groupId;
+            }
+        }
+      });
+
+      this._profilesData = {};
+      Object.keys(tempGroups).forEach(gId => {
+          const group = tempGroups[gId];
+          let finalName = this._configEntriesMap[gId];
+          
+          if (!finalName) {
+              const nameCounts = group.displayNames.reduce((acc, name) => {
+                  acc[name] = (acc[name] || 0) + 1;
+                  return acc;
+              }, {});
+              finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
+          }
+          if (!finalName) finalName = gId; 
+
+          let counter = 1;
+          let uniqueName = finalName;
+          while (this._profilesData[uniqueName]) {
+             uniqueName = `${finalName} (${counter})`;
+             counter++;
+          }
+
+          this._profilesData[uniqueName] = { years: group.years, map: group.map };
       });
 
       this._profileNames = Object.keys(this._profilesData).sort();
       
-      // Khởi tạo profile mặc định nếu chưa có
       if ((!this._currentProfile || !this._profileNames.includes(this._currentProfile)) && this._profileNames.length > 0) {
           this._currentProfile = this._profileNames[0];
+          this._selectedMonth = 'all'; 
       }
 
-      // Cập nhật mảng năm cho profile hiện tại
       if (this._currentProfile && this._profilesData[this._currentProfile]) {
           this._availableYears = Array.from(this._profilesData[this._currentProfile].years).sort((a, b) => b - a);
           if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
               this._selectedYear = this._availableYears[0];
+              this._selectedMonth = 'all';
           }
       } else {
           this._availableYears = [];
       }
+
+      this.updateData();
     }
 
     updateData() {
       if (!this._hass || !this._currentProfile) return;
 
       this._items = [];
+      this._allProfileItems = [];
       this._stats = { orders: 0, items: 0, total: 0 };
-      this._uniqueCategories.clear();
+      this._availableMonths = [];
+      this._expandedOrderId = null; 
+      
+      // Reset phân trang khi đổi năm/tháng
+      this._historyPage = 1;
 
       const currentProf = this._profilesData[this._currentProfile];
-      if (!currentProf) {
-          this.updateView();
-          return;
-      }
+      if (!currentProf) { this.updateView(); return; }
 
+      // Thu thập toàn bộ items của profile để dùng cho Tìm kiếm / Tra cứu
+      Object.values(currentProf.map).forEach(eid => {
+          const state = this._hass.states[eid];
+          if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
+              this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
+          }
+      });
+      this._allProfileItems.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
+
+      // Thu thập items cho năm được chọn (Tab Lịch sử)
       const yearEid = currentProf.map[this._selectedYear];
-      if (!yearEid) {
-          this.updateView();
-          return;
-      }
+      if (!yearEid) { this.updateView(); return; }
 
       const yearState = this._hass.states[yearEid];
       
       if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
           const allItems = yearState.attributes.danh_sach_chi_tiet;
           
-          allItems.forEach(i => { if(i.nganh_hang) this._uniqueCategories.add(i.nganh_hang); });
+          const mSet = new Set();
+          allItems.forEach(i => { 
+              if(i.thang) mSet.add(parseInt(i.thang));
+          });
+          this._availableMonths = Array.from(mSet).sort((a,b) => a - b); 
           
-          if (this._selectedMonth === 'all') {
+          if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth))) {
+              this._selectedMonth = 'all';
               this._items = [...allItems];
               this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
               this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
@@ -549,39 +609,82 @@
       }
     }
 
-    // --- CÁC HÀM XỬ LÝ ACTIONS ---
+    getDaysUntilExpiry(endDateStr) {
+      if (!endDateStr) return null;
+      const end = new Date(endDateStr);
+      if (isNaN(end.getTime())) return null;
+      const now = new Date();
+      now.setHours(0,0,0,0); 
+      end.setHours(0,0,0,0);
+      return Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    }
+
+    checkWarrantyStatus(endDateStr) {
+      const diffDays = this.getDaysUntilExpiry(endDateStr);
+      if (diffDays === null) return { text: endDateStr || '--', class: '' };
+
+      if (diffDays < 0) return { text: formatDate(endDateStr) + ' (Hết BH)', class: 'expired-warranty' };
+      if (diffDays <= 30) return { text: formatDate(endDateStr), class: 'expiring-soon' };
+      return { text: formatDate(endDateStr), class: 'valid-warranty' };
+    }
+
     switchTab(tabName) {
       this._activeTab = tabName;
+      this._expandedOrderId = null; // Reset mở rộng khi đổi tab
+      this._historyPage = 1;
+      this._searchPage = 1;
+      this._warrantyPage = 1;
       this.updateView();
     }
 
-    handleDeleteOrder(orderId) {
+    openDeleteModal(orderId) {
+       this._itemToDelete = orderId;
+       this._showDeleteModal = true;
+       this.updateView();
+    }
+
+    closeDeleteModal() {
+       this._itemToDelete = null;
+       this._showDeleteModal = false;
+       this.updateView();
+    }
+
+    async executeDelete() {
       const currentEid = this._profilesData[this._currentProfile]?.map[this._selectedYear];
       if(!currentEid) return;
       
-      const entryId = this._entryIds[currentEid];
-      if (!entryId) return alert("Hệ thống chưa tải xong kết nối. Vui lòng thử lại sau vài giây.");
+      const orderId = this._itemToDelete;
       
-      if (confirm(`Bạn có chắc chắn muốn xóa đơn hàng ID: ${orderId} của [${this._currentProfile}] không?`)) {
-        this._hass.callService('shopping_history', 'delete_order', {
-          entry_id: entryId,
-          order_id: orderId
-        }).then(() => {}).catch(err => alert("Lỗi khi xóa: " + err.message));
+      const entryId = await this.getEntryId(currentEid);
+      if (!entryId) {
+          alert("Hệ thống HA chưa cung cấp config_entry_id cho thực thể này.\n\nNguyên nhân có thể do kết nối chậm hoặc tài khoản không có quyền Admin. Vui lòng tải lại trang.");
+          this.closeDeleteModal();
+          return;
+      }
+      
+      try {
+          await this._hass.callService('shopping_history', 'delete_order', {
+            entry_id: entryId,
+            order_id: orderId
+          });
+          this.closeDeleteModal();
+      } catch(err) {
+          alert("Lỗi khi xóa từ Home Assistant: " + err.message);
+          this.closeDeleteModal();
       }
     }
 
-    handleAddSubmit(e) {
+    async handleAddSubmit(e) {
       e.preventDefault();
-      
-      // Lấy ngẫu nhiên 1 entity_id của profile hiện tại để xác định entry_id đích
       const profileMap = this._profilesData[this._currentProfile]?.map;
-      const currentEid = profileMap ? Object.values(profileMap)[0] : null;
-      if (!currentEid) return alert("Chưa có cơ sở dữ liệu để lưu!");
+      
+      const currentEid = profileMap ? Object.values(profileMap)[0] : null; 
+      if (!currentEid) return alert("Chưa có dữ liệu cơ sở cho Hồ sơ này để tiến hành lưu!");
 
-      const entryId = this._entryIds[currentEid];
-      if (!entryId) return alert("Hệ thống chưa tải xong kết nối. Vui lòng thử lại sau vài giây.");
+      const entryId = await this.getEntryId(currentEid);
+      if (!entryId) return alert("Hệ thống chưa tải xong kết nối (Không thể lấy config_entry_id).\n\nVui lòng thử lại sau vài giây hoặc tải lại trang.");
 
-      const root = this.shadowRoot;
+      const root = this.card;
       const data = {
           entry_id: entryId,
           name: root.querySelector('#f_name').value,
@@ -599,11 +702,89 @@
       const pDate = root.querySelector('#f_date').value;
       if (pDate) data.purchase_date = pDate;
 
-      this._hass.callService('shopping_history', 'add_order', data).then(() => {
+      try {
+          await this._hass.callService('shopping_history', 'add_order', data);
+          
+          const formEl = root.querySelector('#add-order-form');
+          if(formEl) formEl.reset();
+          
           this.switchTab('history');
-      }).catch(err => alert("Lỗi khi thêm: " + err.message));
+      } catch(err) {
+          alert("Lỗi khi thêm: " + err.message);
+      }
     }
 
+    // --- Hàm Helper Render Phân Trang ---
+    renderPagination(currentPage, totalItems, type) {
+        const totalPages = Math.ceil(totalItems / this._itemsPerPage);
+        if (totalPages <= 1) return ''; // Không hiện phân trang nếu chỉ có 1 trang
+
+        return `
+          <div class="pagination-container">
+            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="1" icon="mdi:chevron-double-left"></ha-icon>
+            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage - 1}" icon="mdi:chevron-left"></ha-icon>
+            <div class="page-info">${currentPage} / ${totalPages}</div>
+            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage + 1}" icon="mdi:chevron-right"></ha-icon>
+            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${totalPages}" icon="mdi:chevron-double-right"></ha-icon>
+          </div>
+        `;
+    }
+
+    // --- Hàm Helper Render Dòng Bảng ---
+    renderTableRows(itemsArray, isSearchMode = false) {
+       if (itemsArray.length === 0) return `<div style="text-align:center; padding: 20px; color: var(--text-dim);">Không có đơn hàng nào.</div>`;
+       
+       return itemsArray.map(item => {
+          const bhStatus = this.checkWarrantyStatus(item.ngay_het_bh);
+          const isExpanded = this._expandedOrderId === item.id;
+          
+          let dateStr = '';
+          if (isSearchMode) {
+              dateStr = formatDate(item.ngay_mua); // Đầy đủ DD/MM/YYYY
+          } else {
+              const p = formatDate(item.ngay_mua).split('/');
+              dateStr = p.length >= 2 ? `${p[0]}/${p[1]}` : formatDate(item.ngay_mua);
+          }
+
+          return `
+          <div class="t-row-container">
+              <div class="t-row ${isExpanded ? 'expanded' : ''}" data-id="${item.id}">
+                <div class="col-date" style="${isSearchMode ? 'font-size: 10px;' : ''}">
+                  <div>${dateStr}</div>
+                  <div class="d-id">ID: ${item.id}</div>
+                </div>
+                <div class="col-info">
+                  <div class="info-name">${item.ten_hang}</div>
+                  <div class="info-sub">
+                      ${item.thoi_gian_bh_thang ? item.thoi_gian_bh_thang + ' tháng' : 'Không BH'} | 
+                      <span class="warranty-date ${bhStatus.class}">${bhStatus.text}</span>
+                  </div>
+                </div>
+                <div class="col-price">
+                  <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
+                  <div class="price-qty">SL: ${item.so_luong}</div>
+                </div>
+                ${!isSearchMode ? `
+                <div class="col-action">
+                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
+                </div>` : ''}
+              </div>
+              
+              ${isExpanded ? `
+              <div class="row-details slide-down">
+                 <div class="detail-grid">
+                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${item.noi_mua || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${item.nganh_hang || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.manufacturer || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat || 0}%</span></div>
+                 </div>
+              </div>
+              ` : ''}
+          </div>
+        `}).join('');
+    }
 
     updateView() {
       if (!this.card) return;
@@ -611,18 +792,18 @@
       const conf = this._config || {};
       const title = conf.title || "Quản Lý Mua Sắm";
       const configIcon = conf.icon || "mdi:cart-outline";
+      const cardHeight = conf.card_height || 600;
 
-      // --- 1. XỬ LÝ STYLE ---
       const applyOpacityToGradientStr = (str, opacity) => str.replace(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi, (match) => hexToRgba(match, opacity));
       const bgType = conf.bg_type || 'gradient';
-      const bgOpacity = conf.bg_opacity !== undefined ? conf.bg_opacity : 60;
+      const bgOpacity = conf.bg_opacity !== undefined ? conf.bg_opacity : 70;
       let stringForContrastCalc = ""; 
 
       if (bgType === 'gradient') {
-          const preset = conf.bg_gradient_preset || 'linear-gradient(135deg, rgba(15,23,42,1), rgba(30,41,59,1))';
+          const preset = conf.bg_gradient_preset || 'linear-gradient(135deg, #2b5876, #4e4376)';
           if (preset === 'custom') {
-              const color1 = conf.bg_gradient_color1 || '#0f172a';
-              const color2 = conf.bg_gradient_color2 || '#1e293b';
+              const color1 = conf.bg_gradient_color1 || '#1e293b';
+              const color2 = conf.bg_gradient_color2 || '#0f172a';
               const angle = conf.bg_gradient_angle !== undefined ? conf.bg_gradient_angle : 135;
               this.card.style.background = `linear-gradient(${angle}deg, ${hexToRgba(color1, bgOpacity)}, ${hexToRgba(color2, bgOpacity)})`;
               stringForContrastCalc = `${color1} ${color2}`;
@@ -631,12 +812,12 @@
               stringForContrastCalc = preset;
           }
       } else {
-          const bgColor = conf.bg_color || '#0f172a';
+          const bgColor = conf.bg_color || '#1e293b';
           this.card.style.background = hexToRgba(bgColor, bgOpacity);
           stringForContrastCalc = bgColor;
       }
 
-      const borderEnabled = conf.border_enable !== undefined ? conf.border_enable : true;
+      const borderEnabled = conf.border_enable !== undefined ? conf.border_enable : false;
       if (borderEnabled) {
           const borderWidth = conf.border_width !== undefined ? conf.border_width : 1;
           const borderOpacity = conf.border_opacity !== undefined ? conf.border_opacity : 10;
@@ -645,7 +826,7 @@
           else this.card.style.border = 'none';
       } else { this.card.style.border = 'none'; }
 
-      const shadowEnabled = conf.shadow_enable !== undefined ? conf.shadow_enable : true;
+      const shadowEnabled = conf.shadow_enable !== undefined ? conf.shadow_enable : false;
       if (shadowEnabled) {
           const shadowColor = conf.shadow_color || '#000000';
           const shadowOpacity = conf.shadow_opacity !== undefined ? conf.shadow_opacity : 20;
@@ -660,6 +841,11 @@
       this.card.style.borderRadius = "var(--ha-card-border-radius, 16px)";
       this.card.style.padding = "clamp(12px, 3vw, 16px)";
       this.card.style.overflow = "hidden";
+      
+      // Setup Flexbox cho thẻ để tận dụng được height
+      this.card.style.height = `${cardHeight}px`;
+      this.card.style.display = 'flex';
+      this.card.style.flexDirection = 'column';
 
       let c_text = conf.textColor || '#f8fafc';
       let c_accent = conf.accentColor || '#0ea5e9';
@@ -700,12 +886,43 @@
               const effB = Math.round(avgB * op + baseBg * (1 - op));
 
               const yiq = ((effR * 299) + (effG * 587) + (effB * 114)) / 1000;
-              if (yiq >= 135) {
-                  c_text = '#1a1a1a'; c_text_dim = 'rgba(0,0,0,0.6)'; c_accent = '#0284c7'; c_money = '#ea580c';
-                  c_block = `rgba(0, 0, 0, Math.max(0.04, ${op * 0.1}))`; c_option_bg = '#ffffff';
+              const isLightBackground = yiq >= 135;
+
+              let r = effR / 255, g = effG / 255, b = effB / 255;
+              let max = Math.max(r, g, b), min = Math.min(r, g, b);
+              let h, s, l = (max + min) / 2;
+              if (max == min) { h = s = 0; }
+              else {
+                  let d = max - min;
+                  s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                  switch(max) {
+                      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                      case g: h = (b - r) / d + 2; break;
+                      case b: h = (r - g) / d + 4; break;
+                  }
+                  h /= 6;
+              }
+              let hue = Math.round(h * 360);
+
+              if (isLightBackground) {
+                  c_text = '#1a1a1a'; c_text_dim = 'rgba(0,0,0,0.6)';
+                  c_block = `rgba(0, 0, 0, ${Math.max(0.04, op * 0.1)})`; c_option_bg = '#ffffff';
+                  
+                  if (s < 0.15) { c_accent = '#0ea5e9'; c_money = '#ea580c'; }
+                  else if (hue >= 330 || hue < 45) { c_accent = '#0891b2'; c_money = '#059669'; } 
+                  else if (hue >= 45 && hue < 160) { c_accent = '#7c3aed'; c_money = '#dc2626'; } 
+                  else if (hue >= 160 && hue < 260) { c_accent = '#ea580c'; c_money = '#be185d'; } 
+                  else { c_accent = '#059669'; c_money = '#0284c7'; } 
+
               } else {
-                  c_text = '#f8fafc'; c_text_dim = 'rgba(255,255,255,0.6)'; c_accent = '#0ea5e9'; c_money = '#38bdf8';
-                  c_block = `rgba(255, 255, 255, Math.max(0.05, ${op * 0.1}))`; c_option_bg = '#1e293b';
+                  c_text = '#ffffff'; c_text_dim = 'rgba(255,255,255,0.6)';
+                  c_block = `rgba(255, 255, 255, ${Math.max(0.05, op * 0.15)})`; c_option_bg = '#1e293b';
+                  
+                  if (s < 0.15) { c_accent = '#38bdf8'; c_money = '#fbbf24'; }
+                  else if (hue >= 330 || hue < 45) { c_accent = '#22d3ee'; c_money = '#34d399'; }
+                  else if (hue >= 45 && hue < 160) { c_accent = '#a78bfa'; c_money = '#f43f5e'; }
+                  else if (hue >= 160 && hue < 260) { c_accent = '#fb923c'; c_money = '#f472b6'; }
+                  else { c_accent = '#4ade80'; c_money = '#38bdf8'; }
               }
           }
       } else {
@@ -715,57 +932,76 @@
 
       const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
 
-      // --- TÍNH TOÁN THANH CHỌN HỒ SƠ ---
+      // Khởi tạo các Class active cho Tab
+      const tabHistoryClass = this._activeTab === 'history' ? 'active' : '';
+      const tabSearchClass = this._activeTab === 'search' ? 'active' : '';
+      const tabAddClass = this._activeTab === 'add' ? 'active' : '';
+
       const pIdx = this._profileNames.indexOf(this._currentProfile);
       const prevOpacity = pIdx > 0 ? 0.8 : 0.2;
       const prevPointer = pIdx > 0 ? 'auto' : 'none';
       const nextOpacity = pIdx < this._profileNames.length - 1 ? 0.8 : 0.2;
       const nextPointer = pIdx < this._profileNames.length - 1 ? 'auto' : 'none';
 
-      let profileNavHtml = '';
-      if (this._profileNames.length > 0) {
-        profileNavHtml = `
-          <div class="profile-selector fade-in">
-              <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
-              <div style="flex:1; display:flex; align-items:center; justify-content:center; gap: 6px;">
-                  <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px;"></ha-icon>
-                  <select id="profile-select">
-                      ${this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')}
-                  </select>
-              </div>
-              <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
-          </div>
-        `;
-      }
-
-      // --- 2. HTML CHO TABS & CÁC TRANG ---
-      const tabHistoryClass = this._activeTab === 'history' ? 'active' : '';
-      const tabAddClass = this._activeTab === 'add' ? 'active' : '';
+      // --- RENDER TOP BAR MỚI (Profile Selector + Nút Tra Cứu) ---
+      let topBarHtml = `
+        <div class="top-bar fade-in">
+            ${this._profileNames.length > 0 ? `
+            <div class="profile-selector">
+                <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
+                <div style="flex:1; display:flex; align-items:center; justify-content:center; gap: 6px;">
+                    <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px;"></ha-icon>
+                    <select id="profile-select">
+                        ${this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')}
+                    </select>
+                </div>
+                <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
+            </div>
+            ` : '<div style="flex:1;"></div>'}
+            
+            <div class="tab search-tab-btn ${tabSearchClass}" data-target="search" title="Tra cứu & Bảo hành">
+                <ha-icon icon="mdi:magnify"></ha-icon>
+                <span class="st-text">Tra cứu</span>
+            </div>
+        </div>
+      `;
 
       let contentHtml = '';
 
+      // --- RENDER TAB LỊCH SỬ ---
       if (this._activeTab === 'history') {
+        
+        const yIdx = this._availableYears.indexOf(this._selectedYear);
+        const yPrevDisabled = yIdx >= this._availableYears.length - 1 || this._availableYears.length === 0 ? 'disabled' : '';
+        const yNextDisabled = yIdx <= 0 || this._availableYears.length === 0 ? 'disabled' : '';
+
+        const mArr = ['all', ...this._availableMonths];
+        const currentM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth);
+        const mIdx = mArr.indexOf(currentM);
+        const mPrevDisabled = mIdx <= 0 ? 'disabled' : '';
+        const mNextDisabled = mIdx >= mArr.length - 1 ? 'disabled' : '';
+
+        // Xử lý Cắt trang Lịch sử
+        const startIdx = (this._historyPage - 1) * this._itemsPerPage;
+        const currentHistoryItems = this._items.slice(startIdx, startIdx + this._itemsPerPage);
+
         contentHtml = `
           <div class="controls fade-in">
             <div class="control-box">
-              <ha-icon icon="mdi:calendar-check"></ha-icon>
-              <div style="width:100%; overflow:hidden;">
-                <div class="cb-label">Năm</div>
-                <select id="year-select">
-                  ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
-                  ${this._availableYears.length === 0 ? `<option value="">---</option>` : ''}
-                </select>
-              </div>
+              <ha-icon class="nav-btn ${yPrevDisabled}" id="prev-year" icon="mdi:chevron-left"></ha-icon>
+              <select id="year-select">
+                ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
+                ${this._availableYears.length === 0 ? `<option value="">---</option>` : ''}
+              </select>
+              <ha-icon class="nav-btn ${yNextDisabled}" id="next-year" icon="mdi:chevron-right"></ha-icon>
             </div>
             <div class="control-box">
-              <ha-icon icon="mdi:calendar-month"></ha-icon>
-              <div style="width:100%; overflow:hidden;">
-                <div class="cb-label">Tháng</div>
-                <select id="month-select">
-                  <option value="all" ${this._selectedMonth === 'all' ? 'selected' : ''}>Cả năm</option>
-                  ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${this._selectedMonth === m ? 'selected' : ''}>Tháng ${m}</option>`).join('')}
-                </select>
-              </div>
+              <ha-icon class="nav-btn ${mPrevDisabled}" id="prev-month" icon="mdi:chevron-left"></ha-icon>
+              <select id="month-select">
+                <option value="all" ${this._selectedMonth === 'all' ? 'selected' : ''}>Cả năm</option>
+                ${this._availableMonths.map(m => `<option value="${m}" ${this._selectedMonth == m ? 'selected' : ''}>Tháng ${m}</option>`).join('')}
+              </select>
+              <ha-icon class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
             </div>
           </div>
 
@@ -774,39 +1010,21 @@
             Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear || '--'}` : `Tháng ${this._selectedMonth}/${this._selectedYear || '--'}`}
           </div>
 
-          <div class="table-wrapper fade-in">
+          <div class="table-container fade-in">
             <div class="t-header">
-              <div>Ngày</div>
-              <div>Thông tin SP</div>
-              <div style="text-align: right; padding-right: 32px;">Thành tiền</div>
+              <div>Ngày</div><div>Thông tin SP</div><div style="text-align: right; padding-right: 32px;">Thành tiền</div>
             </div>
-            
-            ${this._items.length === 0 ? `
-              <div class="empty-state-nice">
-                <ha-icon icon="mdi:cart-remove"></ha-icon>
-                <div class="empty-title">Chưa có dữ liệu</div>
-                <div class="empty-sub">Hồ sơ này chưa có đơn hàng nào trong thời gian bạn chọn.</div>
-                <button class="btn-primary" id="btn-empty-add"><ha-icon icon="mdi:plus"></ha-icon> Thêm đơn hàng ngay</button>
-              </div>
-            ` : this._items.map(item => `
-              <div class="t-row">
-                <div class="col-date">
-                  <div>${formatDate(item.ngay_mua).split('/')[0]}/${formatDate(item.ngay_mua).split('/')[1]}</div>
-                  <div class="d-id">ID: ${item.id}</div>
+            <div class="table-wrapper">
+              ${this._items.length === 0 ? `
+                <div class="empty-state-nice">
+                  <ha-icon icon="mdi:cart-remove"></ha-icon>
+                  <div class="empty-title">Chưa có dữ liệu</div>
+                  <div class="empty-sub">Hồ sơ này chưa có đơn hàng nào trong thời gian bạn chọn.</div>
+                  <button class="btn-primary" id="btn-empty-add"><ha-icon icon="mdi:plus"></ha-icon> Thêm đơn hàng ngay</button>
                 </div>
-                <div class="col-info">
-                  <div class="info-name">${item.ten_hang}</div>
-                  <div class="info-sub">${item.model ? item.model + ' | ' : ''}${item.tinh_trang || 'Mới'} | ${item.noi_mua}</div>
-                </div>
-                <div class="col-price">
-                  <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
-                  <div class="price-qty">SL: ${item.so_luong}</div>
-                </div>
-                <div class="col-action">
-                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
-                </div>
-              </div>
-            `).join('')}
+              ` : this.renderTableRows(currentHistoryItems, false)}
+            </div>
+            ${this.renderPagination(this._historyPage, this._items.length, 'history')}
           </div>
 
           <div class="stats-container fade-in">
@@ -820,14 +1038,98 @@
             </div>
           </div>
         `;
-      } else if (this._activeTab === 'add') {
-        const catOptions = Array.from(this._uniqueCategories).map(c => `<option value="${c}">`).join('');
+      } 
+      // --- RENDER TAB TRA CỨU ---
+      else if (this._activeTab === 'search') {
+        
+        let keywordResults = [];
+        if (this._searchKeyword.trim() !== '') {
+            const kw = this._searchKeyword.toLowerCase().trim();
+            keywordResults = this._allProfileItems.filter(item => 
+                (item.ten_hang && item.ten_hang.toLowerCase().includes(kw)) ||
+                (item.noi_mua && item.noi_mua.toLowerCase().includes(kw)) ||
+                (item.model && item.model.toLowerCase().includes(kw)) ||
+                (item.nganh_hang && item.nganh_hang.toLowerCase().includes(kw))
+            );
+        }
+
+        let warrantyResults = [];
+        this._allProfileItems.forEach(item => {
+            const days = this.getDaysUntilExpiry(item.ngay_het_bh);
+            if (days !== null && days >= 0 && days <= this._warrantyDays) {
+                item._daysLeft = days; 
+                warrantyResults.push(item);
+            }
+        });
+        warrantyResults.sort((a, b) => a._daysLeft - b._daysLeft); // Gần hết hạn lên đầu
+
+        // Cắt trang Tìm kiếm & Bảo hành
+        const startSearch = (this._searchPage - 1) * this._itemsPerPage;
+        const currentSearchItems = keywordResults.slice(startSearch, startSearch + this._itemsPerPage);
+
+        const startWarranty = (this._warrantyPage - 1) * this._itemsPerPage;
+        const currentWarrantyItems = warrantyResults.slice(startWarranty, startWarranty + this._itemsPerPage);
+
+        contentHtml = `
+          <div class="search-tab-content fade-in">
+              <div class="search-box">
+                  <div class="s-input-group">
+                      <ha-icon icon="mdi:magnify"></ha-icon>
+                      <input type="text" id="search-input" value="${this._searchKeyword}" placeholder="Nhập tên SP, nơi mua, model...">
+                      ${this._searchKeyword ? `<ha-icon icon="mdi:close-circle" id="clear-search" class="clear-icon"></ha-icon>` : ''}
+                  </div>
+              </div>
+
+              ${this._searchKeyword ? `
+              <div class="table-container fade-in-fast" style="margin-bottom: 16px; flex: none;">
+                  <div class="t-header search-header">
+                    <div>Ngày mua</div><div>Kết quả tìm kiếm (${keywordResults.length})</div><div style="text-align: right;">Thành tiền</div>
+                  </div>
+                  <div class="table-wrapper">
+                      ${this.renderTableRows(currentSearchItems, true)}
+                  </div>
+                  ${this.renderPagination(this._searchPage, keywordResults.length, 'search')}
+              </div>` : ''}
+
+              <div class="warranty-box">
+                  <div class="w-header">
+                      <ha-icon icon="mdi:shield-alert-outline"></ha-icon> 
+                      Sắp hết bảo hành (dưới <span class="w-hl">${this._warrantyDays}</span> ngày)
+                  </div>
+                  <div class="w-slider-container">
+                      <input type="range" id="warranty-slider" min="0" max="365" value="${this._warrantyDays}" class="modern-slider">
+                      <div class="w-ticks"><span>0</span><span>90</span><span>180</span><span>270</span><span>365</span></div>
+                  </div>
+              </div>
+
+              <div class="table-container fade-in-fast" style="flex:1;">
+                  <div class="t-header warranty-header">
+                    <div>Ngày mua</div><div>Đang trong hạn (${warrantyResults.length})</div><div style="text-align: right;">Thành tiền</div>
+                  </div>
+                  <div class="table-wrapper">
+                      ${this.renderTableRows(currentWarrantyItems, true)}
+                  </div>
+                  ${this.renderPagination(this._warrantyPage, warrantyResults.length, 'warranty')}
+              </div>
+          </div>
+        `;
+      }
+      // --- RENDER TAB THÊM MỚI ---
+      else if (this._activeTab === 'add') {
+        const catOptions = Array.from(this._uniqueCategories).sort().map(c => `<option value="${c}">`).join('');
+        const placeOptions = Array.from(this._uniquePlaces).sort().map(p => `<option value="${p}">`).join('');
+        const mfgOptions = Array.from(this._uniqueManufacturers).sort().map(m => `<option value="${m}">`).join('');
+        
         const todayStr = new Date().toISOString().split('T')[0];
 
         contentHtml = `
-          <form id="add-order-form" class="fade-in">
+          <div class="add-tab-wrapper fade-in">
+          <form id="add-order-form">
             <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${this._currentProfile || 'Mặc định'}</div>
+            
             <datalist id="cat-list">${catOptions}</datalist>
+            <datalist id="place-list">${placeOptions}</datalist>
+            <datalist id="mfg-list">${mfgOptions}</datalist>
             
             <div class="form-row">
               <div class="f-group">
@@ -839,7 +1141,7 @@
             <div class="form-row split">
               <div class="f-group">
                 <label>Nơi mua <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_place" required placeholder="VD: Shopee">
+                <input type="text" id="f_place" required list="place-list" placeholder="VD: Shopee">
               </div>
               <div class="f-group">
                 <label>Ngành hàng <span style="color:var(--money)">*</span></label>
@@ -886,7 +1188,7 @@
                 </div>
                 <div class="f-group">
                   <label>Hãng SX</label>
-                  <input type="text" id="f_manufacturer" placeholder="Thương hiệu">
+                  <input type="text" id="f_manufacturer" list="mfg-list" placeholder="Thương hiệu">
                 </div>
               </div>
               <div class="form-row split">
@@ -905,9 +1207,23 @@
               <ha-icon icon="mdi:content-save-outline"></ha-icon> Lưu Đơn Hàng
             </button>
           </form>
+          </div>
         `;
       }
-
+      
+      const modalHtml = this._showDeleteModal ? `
+        <div class="custom-modal-overlay fade-in-fast">
+            <div class="custom-modal zoom-in">
+                <ha-icon icon="mdi:alert-circle-outline" style="color: #ef4444; font-size: 54px; margin-bottom: 8px;"></ha-icon>
+                <h3>Xác Nhận Xóa Đơn Hàng</h3>
+                <p>Bạn có chắc chắn muốn xóa đơn hàng <strong>ID: ${this._itemToDelete}</strong> không?<br><span style="color: #ef4444; font-size: 0.9em; font-weight: bold; margin-top: 6px; display: inline-block;">Hành động này không thể hoàn tác!</span></p>
+                <div class="modal-actions">
+                    <button class="btn-modal-cancel" id="btn-cancel-del">Quay lại</button>
+                    <button class="btn-modal-confirm" id="btn-confirm-del">Xóa</button>
+                </div>
+            </div>
+        </div>
+      ` : '';
 
       let html = `
         <style>
@@ -921,53 +1237,132 @@
             --glass-border: ${hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2)};
           }
 
-          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 16px; color: var(--text-main); }
+          ::-webkit-scrollbar { width: 6px; height: 6px; }
+          ::-webkit-scrollbar-track { background: transparent; }
+          ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+          ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
 
-          /* PROFILE SELECTOR */
-          .profile-selector { display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 6px 12px; margin-bottom: 16px; border: 1px solid var(--glass-border); }
-          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 800; font-size: clamp(14px, 4vw, 16px); text-align: center; flex: 1; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
+          /* CSS TOP BAR */
+          .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; }
+          .profile-selector { flex: 1; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 12px; border: 1px solid var(--glass-border); margin: 0;}
+          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(14px, 4vw, 16px); text-align: center; flex: 1; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
           .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
           .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px;}
           .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
+          
+          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px);}
+          .search-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
+          .search-tab-btn:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
+          @media (max-width: 380px) { .st-text { display: none; } .search-tab-btn { padding: 0 12px; } }
 
-          /* TABS */
-          .tabs { display: flex; gap: 8px; margin-bottom: 16px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); }
-          .tab { flex: 1; text-align: center; padding: 8px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
-          .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-          .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
+          /* TAB CHÍNH */
+          .tabs { display: flex; gap: 8px; margin-bottom: 12px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); flex-shrink: 0;}
+          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
+          .tabs .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+          .tabs .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
 
-          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: clamp(16px, 4vw, 20px); }
-          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(6px, 1.5vw, 8px) clamp(8px, 2vw, 12px); display: flex; align-items: center; gap: clamp(6px, 2vw, 12px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
-          .control-box ha-icon { color: var(--accent); font-size: clamp(20px, 5vw, 24px); }
-          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; width: 100%; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 2px 0; }
+          .tab-content-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
+          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
+          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
           .control-box select option { background-color: var(--option-bg); color: var(--text-main); }
-          .cb-label { font-size: clamp(9px, 2.5vw, 11px); color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;}
+          .nav-btn { color: var(--text-dim); cursor: pointer; transition: 0.2s; font-size: 24px; }
+          .nav-btn:hover:not(.disabled) { color: var(--accent); transform: scale(1.1); }
+          .nav-btn.disabled { opacity: 0.2; pointer-events: none; }
 
-          .stats-container { margin-top: clamp(12px, 3vw, 16px); padding-top: clamp(12px, 3vw, 16px); border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; }
+          .stats-container { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;}
           .stat-line { display: flex; align-items: center; gap: 8px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
           .stat-line strong { color: var(--money); font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
           .stat-line .val-qty { color: #fbbf24; }
 
-          /* Bảng Chi Tiết */
-          .table-wrapper { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; margin-top: clamp(12px, 3vw, 16px); }
-          .t-header { display: grid; grid-template-columns: clamp(50px, 12vw, 70px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
-          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 70px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); border-bottom: 1px solid rgba(255, 255, 255, 0.03); align-items: center; transition: background 0.2s; gap: 4px; }
-          .t-row:last-child { border-bottom: none; }
-          .t-row:hover { background: rgba(255, 255, 255, 0.05); }
-          .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); }
+          .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
+          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+          
+          /* Loại bỏ scroll vì đã phân trang */
+          .table-wrapper { flex: 1; overflow: hidden; } 
+
+          .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+          .t-row-container:last-child { border-bottom: none; }
+          
+          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
+          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+
+          .t-row:hover { background: rgba(255, 255, 255, 0.08); }
+          .t-row.expanded { background: rgba(0, 0, 0, 0.15); }
+          
+          .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
           .col-date .d-id { font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
-          .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden;}
+          .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden; pointer-events: none;}
           .info-name { font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
           .info-sub { font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden;}
+          
+          .warranty-date.expired-warranty { opacity: 0.5; text-decoration: line-through; }
+          .warranty-date.valid-warranty { color: var(--accent); font-weight: 600; }
+          .warranty-date.expiring-soon { font-weight: 800; animation: pulse-danger 1.5s infinite; }
+          @keyframes pulse-danger { 0% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } 50% { color: #ef4444; text-shadow: 0 0 12px rgba(239, 68, 68, 0.8); } 100% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } }
+
+          .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden; pointer-events: none;}
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
-          .col-action { display: flex; align-items: center; justify-content: center; }
-          .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px;}
+          
+          .col-action { display: flex; align-items: center; justify-content: center; z-index: 2; }
+          .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px; padding: 4px;}
           .btn-delete:hover { opacity: 1; transform: scale(1.1);}
 
-          /* Form Styles */
+          /* CSS CHI TIẾT ĐÃ THU GỌN LẠI */
+          .row-details { background: rgba(0,0,0,0.2); padding: 6px 10px; color: var(--text-main); border-top: 1px dashed var(--glass-border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+          .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+          .d-item { display: flex; flex-direction: column; }
+          .d-lbl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 600;}
+          .d-val { font-size: 11px; font-weight: 500; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .slide-down { animation: slideDownFast 0.2s ease-out forwards; transform-origin: top; }
+          @keyframes slideDownFast { from { opacity: 0; transform: scaleY(0.9); } to { opacity: 1; transform: scaleY(1); } }
+
+          /* CSS PHÂN TRANG (PAGINATION) */
+          .pagination-container { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 6px; border-top: 1px solid var(--glass-border); background: rgba(0,0,0,0.15); flex-shrink: 0;}
+          .page-btn { cursor: pointer; color: var(--text-main); opacity: 0.6; transition: 0.2s; font-size: 24px; padding: 2px; border-radius: 4px; }
+          .page-btn:hover:not(.disabled) { opacity: 1; color: var(--accent); background: rgba(255,255,255,0.05); }
+          .page-btn.disabled { opacity: 0.15; cursor: default; }
+          .page-info { font-size: 11px; font-weight: 700; color: var(--text-dim); background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); }
+
+          .search-tab-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding-right: 4px;}
+          .search-box { background: var(--block-bg); border-radius: 12px; padding: 12px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 12px; }
+          .s-input-group { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--glass-border); transition: 0.2s;}
+          .s-input-group:focus-within { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          .s-input-group ha-icon { color: var(--text-dim); }
+          .s-input-group input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-main); font-size: 14px; font-family: inherit;}
+          .clear-icon { cursor: pointer; color: var(--text-dim) !important; transition: 0.2s; }
+          .clear-icon:hover { color: #ef4444 !important; }
+
+          .warranty-box { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 16px; }
+          .w-header { font-size: 14px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 8px; margin-bottom: 16px;}
+          .w-header ha-icon { color: #facc15; }
+          .w-hl { color: var(--accent); font-weight: 800; font-size: 16px;}
+          
+          .w-slider-container { width: 100%; position: relative;}
+          .modern-slider { -webkit-appearance: none; width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; outline: none; opacity: 0.9; transition: opacity .2s; }
+          .modern-slider:hover { opacity: 1; }
+          .modern-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.5); transition: 0.2s; border: 2px solid #fff;}
+          .modern-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+          .w-ticks { display: flex; justify-content: space-between; padding: 0 4px; margin-top: 8px; font-size: 10px; color: var(--text-dim); font-weight: 600;}
+
+          .custom-modal-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; border-radius: var(--ha-card-border-radius, 16px); }
+          .custom-modal { background: var(--block-bg); border: 1px solid var(--glass-border); padding: 24px; border-radius: 16px; width: 85%; max-width: 300px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); color: var(--text-main); }
+          .custom-modal h3 { margin: 0 0 12px 0; font-size: 18px; color: var(--text-main); }
+          .custom-modal p { margin: 0 0 20px 0; font-size: 14px; color: var(--text-dim); line-height: 1.4; }
+          .modal-actions { display: flex; gap: 12px; justify-content: center; }
+          .btn-modal-cancel, .btn-modal-confirm { flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; transition: 0.2s; font-size: 14px; }
+          .btn-modal-cancel { background: rgba(255,255,255,0.1); color: var(--text-main); }
+          .btn-modal-cancel:hover { background: rgba(255,255,255,0.2); }
+          .btn-modal-confirm { background: #ef4444; color: white; }
+          .btn-modal-confirm:hover { background: #dc2626; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
+
+          .add-tab-wrapper { overflow-y: auto; flex: 1; padding-right: 4px;}
           form { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); }
           .form-title { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
           .form-row { margin-bottom: 12px; }
@@ -976,11 +1371,11 @@
           .f-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
           .f-group input, .f-group select { background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
           .f-group input:focus, .f-group select:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          input::-webkit-calendar-picker-indicator { opacity: 0.5; filter: invert(0.8); cursor: pointer; }
+          input:hover::-webkit-calendar-picker-indicator { opacity: 1; }
           .f-group select option { background: var(--option-bg); color: var(--text-main); }
-          
           .form-details-toggle { font-size: 13px; color: var(--accent); text-align: center; cursor: pointer; margin: 8px 0; display: flex; justify-content: center; align-items: center; gap: 4px; opacity: 0.8;}
           .form-details-toggle:hover { opacity: 1; }
-
           .btn-primary { background: var(--accent); color: #fff; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-family: inherit;}
           .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
           
@@ -990,85 +1385,131 @@
           .empty-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; max-width: 80%; line-height: 1.4;}
 
           .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+          .fade-in-fast { animation: fadeIn 0.15s ease-out forwards; }
+          .zoom-in { animation: zoomIn 0.2s ease-out forwards; }
           @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         </style>
 
         <div class="header">
           ${iconHtml} ${title}
         </div>
 
-        ${profileNavHtml}
+        ${topBarHtml}
         
         <div class="tabs">
            <div class="tab ${tabHistoryClass}" data-target="history">📋 Lịch sử</div>
            <div class="tab ${tabAddClass}" data-target="add">➕ Thêm mới</div>
         </div>
 
-        ${contentHtml}
+        <div class="tab-content-area">
+          ${contentHtml}
+        </div>
+        
+        ${modalHtml}
       `;
 
       this.card.innerHTML = html;
 
-      // --- 3. GẮN CÁC SỰ KIỆN (Event Listeners) ---
-      
-      // Chuyển Tab
-      this.card.querySelectorAll('.tab').forEach(t => {
-        t.addEventListener('click', (e) => {
-          this.switchTab(e.currentTarget.getAttribute('data-target'));
-        });
+      // Listeners cho Pagination
+      this.card.querySelectorAll('.page-btn:not(.disabled)').forEach(btn => {
+         btn.addEventListener('click', (e) => {
+             const type = e.currentTarget.getAttribute('data-type');
+             const newPage = parseInt(e.currentTarget.getAttribute('data-page'));
+             this._expandedOrderId = null; // Đóng tab chi tiết khi chuyển trang
+
+             if (type === 'history') this._historyPage = newPage;
+             if (type === 'search') this._searchPage = newPage;
+             if (type === 'warranty') this._warrantyPage = newPage;
+             
+             this.updateView();
+         });
       });
 
-      // Events cho Profile Selector
+      // Event Listeners cho Tabs & Profile Nav
+      this.card.querySelectorAll('.tab').forEach(t => {
+        t.addEventListener('click', (e) => this.switchTab(e.currentTarget.getAttribute('data-target')));
+      });
+
       const profSel = this.card.querySelector('#profile-select');
       const prevProf = this.card.querySelector('#prev-profile');
       const nextProf = this.card.querySelector('#next-profile');
+      if (profSel) profSel.addEventListener('change', (e) => { this._currentProfile = e.target.value; this.updateData(); });
+      if (prevProf) prevProf.addEventListener('click', () => { let idx = this._profileNames.indexOf(this._currentProfile); if (idx > 0) { this._currentProfile = this._profileNames[idx - 1]; this.updateData(); } });
+      if (nextProf) nextProf.addEventListener('click', () => { let idx = this._profileNames.indexOf(this._currentProfile); if (idx < this._profileNames.length - 1) { this._currentProfile = this._profileNames[idx + 1]; this.updateData(); } });
 
-      if (profSel) {
-          profSel.addEventListener('change', (e) => {
-              this._currentProfile = e.target.value;
-              this.scanSensors();
-              this.updateData();
+      // Event Listeners chung cho Mở rộng Dòng
+      this.card.querySelectorAll('.t-row').forEach(row => {
+          row.addEventListener('click', (e) => {
+              const id = parseInt(e.currentTarget.getAttribute('data-id'));
+              const isExpanding = this._expandedOrderId !== id;
+              this._expandedOrderId = isExpanding ? id : null;
+              this.updateView();
           });
-      }
+      });
 
-      if (prevProf) {
-          prevProf.addEventListener('click', () => {
-              let idx = this._profileNames.indexOf(this._currentProfile);
-              if (idx > 0) {
-                  this._currentProfile = this._profileNames[idx - 1];
-                  this.scanSensors();
-                  this.updateData();
-              }
-          });
-      }
-
-      if (nextProf) {
-          nextProf.addEventListener('click', () => {
-              let idx = this._profileNames.indexOf(this._currentProfile);
-              if (idx < this._profileNames.length - 1) {
-                  this._currentProfile = this._profileNames[idx + 1];
-                  this.scanSensors();
-                  this.updateData();
-              }
-          });
-      }
-
+      // Event Listeners theo từng Tab
       if (this._activeTab === 'history') {
         const ySel = this.card.querySelector('#year-select');
         const mSel = this.card.querySelector('#month-select');
         const btnEmpty = this.card.querySelector('#btn-empty-add');
-        
+        const btnPrevYear = this.card.querySelector('#prev-year');
+        const btnNextYear = this.card.querySelector('#next-year');
+        const btnPrevMonth = this.card.querySelector('#prev-month');
+        const btnNextMonth = this.card.querySelector('#next-month');
+
         if (ySel) ySel.addEventListener('change', (e) => { this._selectedYear = parseInt(e.target.value); this.updateData(); });
-        if (mSel) mSel.addEventListener('change', (e) => { this._selectedMonth = e.target.value === 'all' ? 'all' : parseInt(e.target.value); this.updateData(); });
+        if (mSel) mSel.addEventListener('change', (e) => { this._selectedMonth = e.target.value; this.updateData(); });
         if (btnEmpty) btnEmpty.addEventListener('click', () => this.switchTab('add'));
         
+        if (btnPrevYear && !btnPrevYear.classList.contains('disabled')) btnPrevYear.addEventListener('click', () => { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.updateData(); });
+        if (btnNextYear && !btnNextYear.classList.contains('disabled')) btnNextYear.addEventListener('click', () => { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.updateData(); });
+        if (btnPrevMonth && !btnPrevMonth.classList.contains('disabled')) btnPrevMonth.addEventListener('click', () => { const mArr = ['all', ...this._availableMonths]; const currentM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(currentM); this._selectedMonth = mArr[idx - 1]; this.updateData(); });
+        if (btnNextMonth && !btnNextMonth.classList.contains('disabled')) btnNextMonth.addEventListener('click', () => { const mArr = ['all', ...this._availableMonths]; const currentM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(currentM); this._selectedMonth = mArr[idx + 1]; this.updateData(); });
+
         this.card.querySelectorAll('.btn-delete').forEach(btn => {
            btn.addEventListener('click', (e) => {
-             const id = e.currentTarget.getAttribute('data-id');
-             this.handleDeleteOrder(parseInt(id));
+             e.stopPropagation(); 
+             const id = parseInt(e.currentTarget.getAttribute('data-id'));
+             this.openDeleteModal(id);
            });
         });
+
+        const btnCancelDel = this.card.querySelector('#btn-cancel-del');
+        const btnConfirmDel = this.card.querySelector('#btn-confirm-del');
+        if (btnCancelDel) btnCancelDel.addEventListener('click', () => this.closeDeleteModal());
+        if (btnConfirmDel) btnConfirmDel.addEventListener('click', () => this.executeDelete());
       } 
+      else if (this._activeTab === 'search') {
+          // Xử lý Input Search
+          const searchInput = this.card.querySelector('#search-input');
+          const clearSearch = this.card.querySelector('#clear-search');
+          
+          if (searchInput) {
+              searchInput.addEventListener('input', (e) => {
+                  this._searchKeyword = e.target.value;
+                  this._searchPage = 1; // Reset page khi tìm kiếm
+                  this.updateView(); 
+              });
+              // Focus lại input sau khi render (nếu đang type)
+              setTimeout(() => {
+                  const input = this.card.querySelector('#search-input');
+                  if(input && this._searchKeyword) {
+                      input.focus();
+                      input.setSelectionRange(input.value.length, input.value.length);
+                  }
+              }, 10);
+          }
+          if (clearSearch) clearSearch.addEventListener('click', () => { this._searchKeyword = ''; this._searchPage = 1; this.updateView(); });
+
+          // Xử lý Slider Bảo hành
+          const wSlider = this.card.querySelector('#warranty-slider');
+          if (wSlider) wSlider.addEventListener('input', (e) => {
+              this._warrantyDays = parseInt(e.target.value);
+              this._warrantyPage = 1; // Reset page khi thay đổi hạn BH
+              this.updateView();
+          });
+      }
       else if (this._activeTab === 'add') {
         const toggleBtn = this.card.querySelector('#toggle-details');
         const detailContent = this.card.querySelector('#details-content');
@@ -1083,11 +1524,8 @@
               }
            });
         }
-        
         const form = this.card.querySelector('#add-order-form');
-        if (form) {
-           form.addEventListener('submit', (e) => this.handleAddSubmit(e));
-        }
+        if (form) form.addEventListener('submit', (e) => this.handleAddSubmit(e));
       }
     }
   }
@@ -1099,7 +1537,7 @@
   window.customCards.push({
     type: "shopping-history-card",
     name: "Lịch Sử Mua Sắm",
-    description: "Thẻ hiển thị chi tiết lịch sử mua sắm đa cấu hình, kèm tính năng nhập và xóa trực tiếp.",
+    description: "Thẻ hiển thị chi tiết lịch sử mua sắm đa cấu hình, kèm tính năng nhập, tìm kiếm và kiểm tra bảo hành.",
     preview: true,
   });
 })();
