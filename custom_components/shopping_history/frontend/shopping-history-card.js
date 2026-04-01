@@ -336,8 +336,8 @@
       this._selectedMonth = 'all'; 
       
       this._profilesData = {}; 
-      this._profileNames = [];
-      this._currentProfile = null;
+      this._profileList = []; 
+      this._currentProfileId = null; 
       
       this._availableYears = [];
       this._availableMonths = []; 
@@ -362,19 +362,21 @@
       this._uniqueManufacturers = new Set();
       
       this._expandedOrderId = null; 
-      this._showDeleteModal = false;
       this._itemToDelete = null;
 
       this._configEntriesMap = {};
       this._entityRegistryMap = {};
       this._isScanning = false;
+      this._skeletonBuilt = false;
     }
 
     setConfig(config) {
       if (!config) throw new Error("Invalid configuration");
       this._config = config;
       this.renderInit();
-      if (this._hass) this.updateView();
+      this.updateTheme();
+      this.renderHeaderAndTabs();
+      if (this._hass) this.updateData();
     }
 
     set hass(hass) {
@@ -382,7 +384,6 @@
       this._hass = hass;
       
       if (!oldHass) {
-        this.updateView(); 
         if (!this._isScanning) {
             this._isScanning = true;
             this.performFullScan().finally(() => { this._isScanning = false; });
@@ -391,13 +392,11 @@
         if (this._isScanning) return; 
         
         let shouldUpdate = false;
-        
         const relevantSensors = Object.keys(hass.states).filter(k => 
             k.startsWith('sensor.') && 
             hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
             hass.states[k].attributes.nam !== undefined
         );
-        
         const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
             k.startsWith('sensor.') && 
             oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
@@ -424,7 +423,6 @@
 
     async getEntryId(entityId) {
       if (this._entryIds[entityId]) return this._entryIds[entityId];
-
       try {
         const result = await this._hass.callWS({ type: 'config/entity_registry/get', entity_id: entityId });
         if (result && result.config_entry_id) {
@@ -432,10 +430,10 @@
             return result.config_entry_id;
         }
       } catch (err) {}
-
       return null;
     }
 
+    // --- LOGIC NHÓM MỚI (CHỐNG LỖI ĐỔI TÊN) ---
     async performFullScan() {
       if (!this._hass) return;
 
@@ -502,6 +500,8 @@
       });
 
       this._profilesData = {};
+      this._profileList = [];
+
       Object.keys(tempGroups).forEach(gId => {
           const group = tempGroups[gId];
           let finalName = this._configEntriesMap[gId];
@@ -517,23 +517,29 @@
 
           let counter = 1;
           let uniqueName = finalName;
-          while (this._profilesData[uniqueName]) {
+          while (this._profileList.some(p => p.name === uniqueName)) {
              uniqueName = `${finalName} (${counter})`;
              counter++;
           }
 
-          this._profilesData[uniqueName] = { years: group.years, map: group.map };
+          this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map };
+          this._profileList.push(this._profilesData[gId]);
       });
 
-      this._profileNames = Object.keys(this._profilesData).sort();
+      this._profileList.sort((a, b) => a.name.localeCompare(b.name));
       
-      if ((!this._currentProfile || !this._profileNames.includes(this._currentProfile)) && this._profileNames.length > 0) {
-          this._currentProfile = this._profileNames[0];
-          this._selectedMonth = 'all'; 
+      // Fallback nếu ID hiện tại không tồn tại (chưa chọn hoặc bị xóa mất)
+      if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) {
+          if (this._profileList.length > 0) {
+              this._currentProfileId = this._profileList[0].id;
+              this._selectedMonth = 'all'; 
+          } else {
+              this._currentProfileId = null;
+          }
       }
 
-      if (this._currentProfile && this._profilesData[this._currentProfile]) {
-          this._availableYears = Array.from(this._profilesData[this._currentProfile].years).sort((a, b) => b - a);
+      if (this._currentProfileId && this._profilesData[this._currentProfileId]) {
+          this._availableYears = Array.from(this._profilesData[this._currentProfileId].years).sort((a, b) => b - a);
           if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
               this._selectedYear = this._availableYears[0];
               this._selectedMonth = 'all';
@@ -552,16 +558,14 @@
       this._allProfileItems = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       this._availableMonths = [];
-      this._expandedOrderId = null; 
       
-      this._historyPage = 1;
-
-      if (!this._currentProfile || !this._profilesData[this._currentProfile]) { 
-          this.updateView(); 
+      if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) { 
+          this.renderHeaderAndTabs();
+          this.renderContent();
           return; 
       }
       
-      const currentProf = this._profilesData[this._currentProfile];
+      const currentProf = this._profilesData[this._currentProfileId];
 
       Object.values(currentProf.map).forEach(eid => {
           const state = this._hass.states[eid];
@@ -572,383 +576,562 @@
       this._allProfileItems.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
 
       const yearEid = currentProf.map[this._selectedYear];
-      if (!yearEid) { this.updateView(); return; }
-
-      const yearState = this._hass.states[yearEid];
-      
-      if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
-          const allItems = yearState.attributes.danh_sach_chi_tiet;
-          
-          const mSet = new Set();
-          allItems.forEach(i => { 
-              if(i.thang) mSet.add(parseInt(i.thang));
-          });
-          this._availableMonths = Array.from(mSet).sort((a,b) => a - b); 
-          
-          if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth))) {
-              this._selectedMonth = 'all';
-              this._items = [...allItems];
-              this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
-              this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
-              this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
-          } else {
-              this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
-              this._stats.orders = this._items.length;
-              this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
-              this._stats.total = this._items.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+      if (yearEid) {
+          const yearState = this._hass.states[yearEid];
+          if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
+              const allItems = yearState.attributes.danh_sach_chi_tiet;
+              const mSet = new Set();
+              allItems.forEach(i => { if(i.thang) mSet.add(parseInt(i.thang)); });
+              this._availableMonths = Array.from(mSet).sort((a,b) => a - b); 
+              
+              if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth))) {
+                  this._selectedMonth = 'all';
+                  this._items = [...allItems];
+                  this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
+                  this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
+                  this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+              } else {
+                  this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
+                  this._stats.orders = this._items.length;
+                  this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
+                  this._stats.total = this._items.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+              }
           }
       }
 
       this._items.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
-      this.updateView();
+      
+      // Cập nhật lại giao diện tĩnh (Tabs, Topbar) và Nội dung (Content)
+      this.renderHeaderAndTabs();
+      this.renderContent();
     }
 
-    renderInit() {
-      if (!this.card) {
-        this.card = document.createElement('ha-card');
-        this.shadowRoot.appendChild(this.card);
-      }
-    }
-
+    // --- TIỆN ÍCH HIỂN THỊ ---
     getDaysUntilExpiry(endDateStr) {
       if (!endDateStr) return null;
       const end = new Date(endDateStr);
       if (isNaN(end.getTime())) return null;
       const now = new Date();
-      now.setHours(0,0,0,0); 
-      end.setHours(0,0,0,0);
+      now.setHours(0,0,0,0); end.setHours(0,0,0,0);
       return Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     }
 
     checkWarrantyStatus(endDateStr) {
       const diffDays = this.getDaysUntilExpiry(endDateStr);
       if (diffDays === null) return { text: endDateStr || '--', class: '' };
-
       if (diffDays < 0) return { text: formatDate(endDateStr) + ' (Hết BH)', class: 'expired-warranty' };
       if (diffDays <= 30) return { text: formatDate(endDateStr), class: 'expiring-soon' };
       return { text: formatDate(endDateStr), class: 'valid-warranty' };
     }
 
-    switchTab(tabName) {
-      this._activeTab = tabName;
-      this._expandedOrderId = null; 
-      this._historyPage = 1;
-      this._searchPage = 1;
-      this._warrantyPage = 1;
-      this.updateView();
-    }
-
-    openDeleteModal(orderId) {
-       this._itemToDelete = orderId;
-       this._showDeleteModal = true;
-       this.updateView();
-    }
-
-    closeDeleteModal() {
-       this._itemToDelete = null;
-       this._showDeleteModal = false;
-       this.updateView();
-    }
-
-    async executeDelete() {
-      const currentEid = this._profilesData[this._currentProfile]?.map[this._selectedYear];
-      if(!currentEid) return;
-      
-      const orderId = this._itemToDelete;
-      
-      const entryId = await this.getEntryId(currentEid);
-      if (!entryId) {
-          alert("Hệ thống HA chưa cung cấp config_entry_id cho thực thể này.\n\nNguyên nhân có thể do kết nối chậm hoặc tài khoản không có quyền Admin. Vui lòng tải lại trang.");
-          this.closeDeleteModal();
-          return;
-      }
-      
-      try {
-          await this._hass.callService('shopping_history', 'delete_order', {
-            entry_id: entryId,
-            order_id: orderId
-          });
-          this.closeDeleteModal();
-      } catch(err) {
-          alert("Lỗi khi xóa từ Home Assistant: " + err.message);
-          this.closeDeleteModal();
-      }
-    }
-
-    async handleAddSubmit(e) {
-      e.preventDefault();
-      const profileMap = this._profilesData[this._currentProfile]?.map;
-      
-      const currentEid = profileMap ? Object.values(profileMap)[0] : null; 
-      if (!currentEid) return alert("Chưa có dữ liệu cơ sở cho Hồ sơ này để tiến hành lưu!");
-
-      const entryId = await this.getEntryId(currentEid);
-      if (!entryId) return alert("Hệ thống chưa tải xong kết nối (Không thể lấy config_entry_id).\n\nVui lòng thử lại sau vài giây hoặc tải lại trang.");
-
-      const root = this.card;
-      const data = {
-          entry_id: entryId,
-          name: root.querySelector('#f_name').value,
-          place: root.querySelector('#f_place').value,
-          category: root.querySelector('#f_category').value,
-          price: parseFloat(root.querySelector('#f_price').value),
-          quantity: parseFloat(root.querySelector('#f_qty').value) || 1,
-          vat: parseFloat(root.querySelector('#f_vat').value) || 0,
-          status: root.querySelector('#f_status').value,
-          model: root.querySelector('#f_model').value || "",
-          manufacturer: root.querySelector('#f_manufacturer').value || "",
-          warranty_months: parseInt(root.querySelector('#f_warranty').value) || 0,
-      };
-
-      const pDate = root.querySelector('#f_date').value;
-      if (pDate) data.purchase_date = pDate;
-
-      try {
-          await this._hass.callService('shopping_history', 'add_order', data);
-          
-          const formEl = root.querySelector('#add-order-form');
-          if(formEl) formEl.reset();
-          
-          this.switchTab('history');
-      } catch(err) {
-          alert("Lỗi khi thêm: " + err.message);
-      }
-    }
-
-    renderPagination(currentPage, totalItems, type) {
-        const totalPages = Math.ceil(totalItems / this._itemsPerPage);
-        if (totalPages <= 1) return ''; 
-
-        return `
-          <div class="pagination-container">
-            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="1" icon="mdi:chevron-double-left"></ha-icon>
-            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage - 1}" icon="mdi:chevron-left"></ha-icon>
-            <div class="page-info">${currentPage} / ${totalPages}</div>
-            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage + 1}" icon="mdi:chevron-right"></ha-icon>
-            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${totalPages}" icon="mdi:chevron-double-right"></ha-icon>
-          </div>
+    // --- CẤU TRÚC RENDER MODULE ---
+    renderInit() {
+      if (!this.card) {
+        this.card = document.createElement('ha-card');
+        this.shadowRoot.appendChild(this.card);
+        
+        // Vẽ khung xương HTML 1 lần duy nhất
+        this.card.innerHTML = `
+          <div id="c-header" class="header"></div>
+          <div id="c-topbar" class="top-bar"></div>
+          <div id="c-tabs" class="tabs"></div>
+          <div id="c-content" class="tab-content-area"></div>
+          <div id="c-modal"></div>
         `;
+        
+        this._els = {
+            header: this.card.querySelector('#c-header'),
+            topbar: this.card.querySelector('#c-topbar'),
+            tabs: this.card.querySelector('#c-tabs'),
+            content: this.card.querySelector('#c-content'),
+            modal: this.card.querySelector('#c-modal')
+        };
+        
+        this.attachGlobalListeners();
+        this.injectStaticCSS();
+        this._skeletonBuilt = true;
+      }
     }
 
-    renderTableRows(itemsArray, isSearchMode = false) {
-       if (itemsArray.length === 0) return `<div style="text-align:center; padding: 20px; color: var(--text-dim);">Không có đơn hàng nào.</div>`;
-       
-       return itemsArray.map(item => {
-          const bhStatus = this.checkWarrantyStatus(item.ngay_het_bh);
-          const isExpanded = this._expandedOrderId === item.id;
+    injectStaticCSS() {
+        const style = document.createElement('style');
+        style.textContent = `
+          ::-webkit-scrollbar { width: 6px; height: 6px; }
+          ::-webkit-scrollbar-track { background: transparent; }
+          ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+          ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
+          .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
+
+          .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; width: 100%; box-sizing: border-box;}
+          .profile-selector { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 8px; border: 1px solid var(--glass-border); margin: 0;}
+          .profile-info-wrapper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; }
+          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
+          .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
+          .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px; flex-shrink: 0;}
+          .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
           
-          let dateStr = '';
-          if (isSearchMode) {
-              dateStr = formatDate(item.ngay_mua); 
-          } else {
-              const p = formatDate(item.ngay_mua).split('/');
-              dateStr = p.length >= 2 ? `${p[0]}/${p[1]}` : formatDate(item.ngay_mua);
-          }
+          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
+          .search-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
+          .search-tab-btn:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
+          
+          @media (max-width: 420px) { .st-text { display: none; } .search-tab-btn { padding: 0 10px; } }
 
-          return `
-          <div class="t-row-container">
-              <div class="t-row ${isExpanded ? 'expanded' : ''}" data-id="${item.id}">
-                <div class="col-date" style="${isSearchMode ? 'font-size: 10px;' : ''}">
-                  <div>${dateStr}</div>
-                  <div class="d-id">ID: ${item.id}</div>
-                </div>
-                <div class="col-info">
-                  <div class="info-name">${item.ten_hang}</div>
-                  <div class="info-sub">
-                      ${item.thoi_gian_bh_thang ? item.thoi_gian_bh_thang + ' tháng' : 'Không BH'} | 
-                      <span class="warranty-date ${bhStatus.class}">${bhStatus.text}</span>
-                  </div>
-                </div>
-                <div class="col-price">
-                  <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
-                  <div class="price-qty">SL: ${item.so_luong}</div>
-                </div>
-                ${!isSearchMode ? `
-                <div class="col-action">
-                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
-                </div>` : ''}
-              </div>
-              
-              ${isExpanded ? `
-              <div class="row-details slide-down">
-                 <div class="detail-grid">
-                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${item.noi_mua || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${item.nganh_hang || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.manufacturer || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat || 0}%</span></div>
-                 </div>
-              </div>
-              ` : ''}
-          </div>
-        `}).join('');
+          .tabs { display: flex; gap: 8px; margin-bottom: 12px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); flex-shrink: 0;}
+          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
+          .tabs .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+          .tabs .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
+
+          .tab-content-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
+          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
+          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
+          .control-box select option { background-color: var(--option-bg); color: var(--text-main); }
+          .nav-btn { color: var(--text-dim); cursor: pointer; transition: 0.2s; font-size: 24px; }
+          .nav-btn:hover:not(.disabled) { color: var(--accent); transform: scale(1.1); }
+          .nav-btn.disabled { opacity: 0.2; pointer-events: none; }
+
+          .stats-container { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;}
+          .stat-line { display: flex; align-items: center; gap: 8px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
+          .stat-line strong { color: var(--money); font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
+          .stat-line .val-qty { color: #fbbf24; }
+
+          .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
+          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+          
+          .table-wrapper { flex: 1; overflow: auto; } 
+
+          .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+          .t-row-container:last-child { border-bottom: none; }
+          
+          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
+          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+
+          .t-row:hover { background: rgba(255, 255, 255, 0.08); }
+          .t-row.expanded { background: rgba(0, 0, 0, 0.15); }
+          
+          .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
+          .col-date .d-id { font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
+          .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden; pointer-events: none;}
+          .info-name { font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .info-sub { font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          
+          .warranty-date.expired-warranty { opacity: 0.5; text-decoration: line-through; }
+          .warranty-date.valid-warranty { color: var(--accent); font-weight: 600; }
+          .warranty-date.expiring-soon { font-weight: 800; animation: pulse-danger 1.5s infinite; }
+          @keyframes pulse-danger { 0% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } 50% { color: #ef4444; text-shadow: 0 0 12px rgba(239, 68, 68, 0.8); } 100% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } }
+
+          .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden; pointer-events: none;}
+          .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
+          .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
+          
+          .col-action { display: flex; align-items: center; justify-content: center; z-index: 2; }
+          .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px; padding: 4px;}
+          .btn-delete:hover { opacity: 1; transform: scale(1.1);}
+
+          .row-details { background: rgba(0,0,0,0.2); padding: 6px 10px; color: var(--text-main); border-top: 1px dashed var(--glass-border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+          .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+          .d-item { display: flex; flex-direction: column; }
+          .d-lbl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 600;}
+          .d-val { font-size: 11px; font-weight: 500; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .slide-down { animation: slideDownFast 0.2s ease-out forwards; transform-origin: top; }
+          @keyframes slideDownFast { from { opacity: 0; transform: scaleY(0.9); } to { opacity: 1; transform: scaleY(1); } }
+
+          .pagination-container { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 6px; border-top: 1px solid var(--glass-border); background: rgba(0,0,0,0.15); flex-shrink: 0;}
+          .page-btn { cursor: pointer; color: var(--text-main); opacity: 0.6; transition: 0.2s; font-size: 24px; padding: 2px; border-radius: 4px; }
+          .page-btn:hover:not(.disabled) { opacity: 1; color: var(--accent); background: rgba(255,255,255,0.05); }
+          .page-btn.disabled { opacity: 0.15; cursor: default; }
+          .page-info { font-size: 11px; font-weight: 700; color: var(--text-dim); background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); }
+
+          .search-tab-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding-right: 4px;}
+          .search-box { background: var(--block-bg); border-radius: 12px; padding: 12px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 12px; }
+          .s-input-group { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--glass-border); transition: 0.2s;}
+          .s-input-group:focus-within { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          .s-input-group ha-icon { color: var(--text-dim); }
+          .s-input-group input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-main); font-size: 14px; font-family: inherit;}
+          .clear-icon { cursor: pointer; color: var(--text-dim) !important; transition: 0.2s; }
+          .clear-icon:hover { color: #ef4444 !important; }
+
+          .warranty-box { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 16px; }
+          .w-header { font-size: 14px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 8px; margin-bottom: 16px;}
+          .w-header ha-icon { color: #facc15; }
+          .w-hl { color: var(--accent); font-weight: 800; font-size: 16px;}
+          
+          .w-slider-container { width: 100%; position: relative;}
+          .modern-slider { -webkit-appearance: none; width: 100%; height: 8px; border-radius: 4px; outline: none; opacity: 0.9; transition: opacity .2s; margin: 10px 0; background: rgba(255,255,255,0.1); }
+          .modern-slider:hover { opacity: 1; }
+          .modern-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); cursor: pointer; border: 4px solid rgba(255,255,255,0.85); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
+          .modern-slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+          .modern-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); cursor: pointer; border: 4px solid rgba(255,255,255,0.85); box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.1s; }
+          .modern-slider::-moz-range-thumb:hover { transform: scale(1.15); }
+
+          .w-ticks { display: flex; justify-content: space-between; padding: 0 4px; margin-top: 8px; font-size: 10px; color: var(--text-dim); font-weight: 600;}
+
+          .custom-modal-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; border-radius: var(--ha-card-border-radius, 16px); }
+          .custom-modal { background: var(--block-bg); border: 1px solid var(--glass-border); padding: 24px; border-radius: 16px; width: 85%; max-width: 300px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); color: var(--text-main); }
+          .custom-modal h3 { margin: 0 0 12px 0; font-size: 18px; color: var(--text-main); }
+          .custom-modal p { margin: 0 0 20px 0; font-size: 14px; color: var(--text-dim); line-height: 1.4; }
+          .modal-actions { display: flex; gap: 12px; justify-content: center; }
+          .btn-modal-cancel, .btn-modal-confirm { flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; transition: 0.2s; font-size: 14px; }
+          .btn-modal-cancel { background: rgba(255,255,255,0.1); color: var(--text-main); }
+          .btn-modal-cancel:hover { background: rgba(255,255,255,0.2); }
+          .btn-modal-confirm { background: #ef4444; color: white; }
+          .btn-modal-confirm:hover { background: #dc2626; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
+
+          .add-tab-wrapper { overflow-y: auto; flex: 1; padding-right: 4px;}
+          form { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); }
+          .form-title { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
+          .form-row { margin-bottom: 12px; }
+          .form-row.split { display: flex; gap: 12px; }
+          
+          .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+          .f-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+          .f-group input, .f-group select { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
+          .f-group input:focus, .f-group select:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          
+          input::-webkit-calendar-picker-indicator { opacity: 0.5; filter: invert(0.8); cursor: pointer; }
+          input:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+          .f-group select option { background: var(--option-bg); color: var(--text-main); }
+          .form-details-toggle { font-size: 13px; color: var(--accent); text-align: center; cursor: pointer; margin: 8px 0; display: flex; justify-content: center; align-items: center; gap: 4px; opacity: 0.8;}
+          .form-details-toggle:hover { opacity: 1; }
+          .btn-primary { background: var(--accent); color: #fff; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-family: inherit;}
+          .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+          
+          .empty-state-nice { text-align: center; padding: 32px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px;}
+          .empty-state-nice ha-icon { font-size: 64px; color: var(--text-dim); opacity: 0.5; margin-bottom: 8px;}
+          .empty-title { font-size: 18px; font-weight: 700; color: var(--text-main); }
+          .empty-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; max-width: 80%; line-height: 1.4;}
+
+          .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+          .fade-in-fast { animation: fadeIn 0.15s ease-out forwards; }
+          .zoom-in { animation: zoomIn 0.2s ease-out forwards; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        `;
+        this.shadowRoot.appendChild(style);
     }
 
-    updateView() {
-      if (!this.card) return;
+    // --- UỶ QUYỀN SỰ KIỆN TOÀN CỤC (GLOBAL EVENT DELEGATION) ---
+    // Giúp thẻ không bị nháy, không phải addEvent lại nhiều lần
+    attachGlobalListeners() {
+        this.card.addEventListener('click', (e) => {
+            // Đổi Tabs
+            const tab = e.target.closest('.tab[data-target]');
+            if (tab) { this.switchTab(tab.dataset.target); return; }
+            
+            const searchBtn = e.target.closest('.search-tab-btn');
+            if (searchBtn) { this.switchTab('search'); return; }
 
-      const conf = this._config || {};
-      const title = conf.title || "Quản Lý Mua Sắm";
-      const configIcon = conf.icon || "mdi:cart-outline";
-      const cardHeight = conf.card_height || 600;
+            // Phân trang
+            const pageBtn = e.target.closest('.page-btn:not(.disabled)');
+            if (pageBtn) {
+                const type = pageBtn.dataset.type;
+                const page = parseInt(pageBtn.dataset.page);
+                if (type === 'history') { this._historyPage = page; this.renderHistoryDynamic(); }
+                if (type === 'search') { this._searchPage = page; this.renderSearchDynamic(); }
+                if (type === 'warranty') { this._warrantyPage = page; this.renderSearchDynamic(); }
+                return;
+            }
 
-      const applyOpacityToGradientStr = (str, opacity) => str.replace(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi, (match) => hexToRgba(match, opacity));
-      const bgType = conf.bg_type || 'gradient';
-      const bgOpacity = conf.bg_opacity !== undefined ? conf.bg_opacity : 70;
-      let stringForContrastCalc = ""; 
+            // Expand/Collapse Chi Tiết Đơn Hàng (Ẩn hiện CSS - Nhanh và Mượt)
+            const tRow = e.target.closest('.t-row');
+            const btnDelete = e.target.closest('.btn-delete');
+            
+            if (btnDelete) {
+                e.stopPropagation();
+                this.openDeleteModal(parseInt(btnDelete.dataset.id));
+                return;
+            }
 
-      if (bgType === 'gradient') {
-          const preset = conf.bg_gradient_preset || 'linear-gradient(135deg, #2b5876, #4e4376)';
-          if (preset === 'custom') {
-              const color1 = conf.bg_gradient_color1 || '#1e293b';
-              const color2 = conf.bg_gradient_color2 || '#0f172a';
-              const angle = conf.bg_gradient_angle !== undefined ? conf.bg_gradient_angle : 135;
-              this.card.style.background = `linear-gradient(${angle}deg, ${hexToRgba(color1, bgOpacity)}, ${hexToRgba(color2, bgOpacity)})`;
-              stringForContrastCalc = `${color1} ${color2}`;
-          } else {
-              this.card.style.background = applyOpacityToGradientStr(preset, bgOpacity);
-              stringForContrastCalc = preset;
-          }
-      } else {
-          const bgColor = conf.bg_color || '#1e293b';
-          this.card.style.background = hexToRgba(bgColor, bgOpacity);
-          stringForContrastCalc = bgColor;
-      }
+            if (tRow) {
+                const isExpanded = tRow.classList.contains('expanded');
+                const details = tRow.nextElementSibling;
+                const wrapper = tRow.closest('.table-wrapper');
+                
+                // Đóng tất cả row khác trong cùng 1 table
+                if (wrapper) {
+                    wrapper.querySelectorAll('.t-row.expanded').forEach(r => {
+                        if (r !== tRow) {
+                            r.classList.remove('expanded');
+                            const d = r.nextElementSibling;
+                            if (d && d.classList.contains('row-details')) d.style.display = 'none';
+                        }
+                    });
+                }
 
-      const borderEnabled = conf.border_enable !== undefined ? conf.border_enable : false;
-      if (borderEnabled) {
-          const borderWidth = conf.border_width !== undefined ? conf.border_width : 1;
-          const borderOpacity = conf.border_opacity !== undefined ? conf.border_opacity : 10;
-          const borderColor = conf.border_color || '#ffffff';
-          if (borderOpacity > 0 && borderWidth > 0) this.card.style.border = `${borderWidth}px solid ${hexToRgba(borderColor, borderOpacity)}`;
-          else this.card.style.border = 'none';
-      } else { this.card.style.border = 'none'; }
+                if (!isExpanded) {
+                    tRow.classList.add('expanded');
+                    if (details && details.classList.contains('row-details')) details.style.display = 'block';
+                    this._expandedOrderId = parseInt(tRow.dataset.id);
+                } else {
+                    tRow.classList.remove('expanded');
+                    if (details && details.classList.contains('row-details')) details.style.display = 'none';
+                    this._expandedOrderId = null;
+                }
+                return;
+            }
 
-      const shadowEnabled = conf.shadow_enable !== undefined ? conf.shadow_enable : false;
-      if (shadowEnabled) {
-          const shadowColor = conf.shadow_color || '#000000';
-          const shadowOpacity = conf.shadow_opacity !== undefined ? conf.shadow_opacity : 20;
-          const blur = conf.shadow_blur !== undefined ? conf.shadow_blur : 32;
-          const offsetX = conf.shadow_offset_x !== undefined ? conf.shadow_offset_x : 0;
-          const offsetY = conf.shadow_offset_y !== undefined ? conf.shadow_offset_y : 8;
-          this.card.style.boxShadow = `${offsetX}px ${offsetY}px ${blur}px ${hexToRgba(shadowColor, shadowOpacity)}`;
-      } else { this.card.style.boxShadow = 'none'; }
-      
-      this.card.style.backdropFilter = "blur(16px)";
-      this.card.style.webkitBackdropFilter = "blur(16px)";
-      this.card.style.borderRadius = "var(--ha-card-border-radius, 16px)";
-      this.card.style.padding = "clamp(12px, 3vw, 16px)";
-      this.card.style.overflow = "hidden";
-      
-      this.card.style.height = `${cardHeight}px`;
-      this.card.style.display = 'flex';
-      this.card.style.flexDirection = 'column';
+            // Nút Thêm ở State Trống
+            if (e.target.closest('#btn-empty-add')) { this.switchTab('add'); return; }
 
-      let c_text = conf.textColor || '#f8fafc';
-      let c_accent = conf.accentColor || '#0ea5e9';
-      let c_money = conf.moneyColor || '#38bdf8';
-      let c_block = conf.blockBg || 'rgba(255, 255, 255, 0.05)';
-      let c_text_dim = '';
-      let c_option_bg = '';
+            // Nút Nav (Năm/Tháng)
+            const navBtn = e.target.closest('.nav-btn:not(.disabled)');
+            if (navBtn) {
+                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.updateData(); }
+                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.updateData(); }
+                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.updateData(); }
+                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.updateData(); }
+                return;
+            }
 
-      if (conf.auto_contrast !== false) { 
-          const hexRegex = /#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi;
-          let match;
-          let colorsToCheck = [];
-          while ((match = hexRegex.exec(stringForContrastCalc)) !== null) {
-              let hex = match[1];
-              if (hex.length === 3) hex = hex.split('').map(x => x+x).join('');
-              colorsToCheck.push({ r: parseInt(hex.substring(0,2), 16), g: parseInt(hex.substring(2,4), 16), b: parseInt(hex.substring(4,6), 16) });
-          }
-          const rgbRegex = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/gi;
-          while ((match = rgbRegex.exec(stringForContrastCalc)) !== null) {
-              colorsToCheck.push({ r: parseInt(match[1], 10), g: parseInt(match[2], 10), b: parseInt(match[3], 10) });
-          }
+            // Profile Nav
+            const pNav = e.target.closest('.profile-nav');
+            if (pNav) {
+                let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
+                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.updateData(); }
+                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.updateData(); }
+                return;
+            }
 
-          if (colorsToCheck.length > 0) {
-              let avgR = 0, avgG = 0, avgB = 0;
-              colorsToCheck.forEach(c => { avgR += c.r; avgG += c.g; avgB += c.b; });
-              avgR = Math.round(avgR / colorsToCheck.length);
-              avgG = Math.round(avgG / colorsToCheck.length);
-              avgB = Math.round(avgB / colorsToCheck.length);
+            // Modal Actions
+            if (e.target.closest('#btn-cancel-del')) { this.closeDeleteModal(); return; }
+            if (e.target.closest('#btn-confirm-del')) { this.executeDelete(); return; }
 
-              let isDarkTheme = false;
-              if (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) isDarkTheme = this._hass.themes.darkMode;
-              else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) isDarkTheme = true;
+            // Toggle thêm chi tiết Add Form
+            const toggleDetails = e.target.closest('#toggle-details');
+            if (toggleDetails) {
+                const detailsContent = this.card.querySelector('#details-content');
+                if (detailsContent) {
+                    if (detailsContent.style.display === 'none') {
+                        detailsContent.style.display = 'block';
+                        toggleDetails.innerHTML = `<span>Ẩn thông tin chi tiết</span> <ha-icon icon="mdi:chevron-up"></ha-icon>`;
+                    } else {
+                        detailsContent.style.display = 'none';
+                        toggleDetails.innerHTML = `<span>Nhập thông tin chi tiết (Model, BH, VAT...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>`;
+                    }
+                }
+            }
+        });
 
-              const op = bgOpacity / 100;
-              const baseBg = isDarkTheme ? 30 : 245; 
-              const effR = Math.round(avgR * op + baseBg * (1 - op));
-              const effG = Math.round(avgG * op + baseBg * (1 - op));
-              const effB = Math.round(avgB * op + baseBg * (1 - op));
+        // Xử lý Select & Slider (Change)
+        this.card.addEventListener('change', (e) => {
+            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.updateData(); }
+            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.updateData(); }
+            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.updateData(); }
+            else if (e.target.id === 'warranty-slider') {
+                this._warrantyDays = parseInt(e.target.value);
+                this._warrantyPage = 1;
+                this.renderSearchDynamic();
+            }
+        });
 
-              const yiq = ((effR * 299) + (effG * 587) + (effB * 114)) / 1000;
-              const isLightBackground = yiq >= 135;
+        // Xử lý Input (Đánh chữ Search / Kéo Slider mượt)
+        this.card.addEventListener('input', (e) => {
+            if (e.target.id === 'search-input') {
+                this._searchKeyword = e.target.value;
+                this._searchPage = 1;
+                
+                const clearIcon = this.card.querySelector('#clear-search');
+                if(this._searchKeyword && !clearIcon) {
+                    const ic = document.createElement('ha-icon');
+                    ic.icon = 'mdi:close-circle'; ic.id = 'clear-search'; ic.className = 'clear-icon';
+                    e.target.parentElement.appendChild(ic);
+                } else if (!this._searchKeyword && clearIcon) { clearIcon.remove(); }
+                
+                this.renderSearchDynamic();
+            } 
+            else if (e.target.id === 'warranty-slider') {
+                const val = e.target.value;
+                const wValText = this.card.querySelector('#warranty-days-text');
+                if (wValText) wValText.textContent = val;
+                const percent = (val / 365) * 100;
+                e.target.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${percent}%, rgba(255,255,255,0.1) ${percent}%, rgba(255,255,255,0.1) 100%)`;
+            }
+        });
+        
+        // Xóa search
+        this.card.addEventListener('click', (e) => {
+           if(e.target.closest('#clear-search')) {
+               const inp = this.card.querySelector('#search-input');
+               if(inp) { inp.value = ''; this._searchKeyword = ''; }
+               e.target.remove();
+               this._searchPage = 1;
+               this.renderSearchDynamic();
+           } 
+        });
 
-              let r = effR / 255, g = effG / 255, b = effB / 255;
-              let max = Math.max(r, g, b), min = Math.min(r, g, b);
-              let h, s, l = (max + min) / 2;
-              if (max == min) { h = s = 0; }
-              else {
-                  let d = max - min;
-                  s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                  switch(max) {
-                      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                      case g: h = (b - r) / d + 2; break;
-                      case b: h = (r - g) / d + 4; break;
-                  }
-                  h /= 6;
-              }
-              let hue = Math.round(h * 360);
+        // Form Submit
+        this.card.addEventListener('submit', (e) => {
+            if (e.target.id === 'add-order-form') { e.preventDefault(); this.handleAddSubmit(e); }
+        });
+    }
 
-              if (isLightBackground) {
-                  c_text = '#1a1a1a'; c_text_dim = 'rgba(0,0,0,0.6)';
-                  c_block = `rgba(0, 0, 0, ${Math.max(0.04, op * 0.1)})`; c_option_bg = '#ffffff';
-                  
-                  if (s < 0.15) { c_accent = '#0ea5e9'; c_money = '#ea580c'; }
-                  else if (hue >= 330 || hue < 45) { c_accent = '#0891b2'; c_money = '#059669'; } 
-                  else if (hue >= 45 && hue < 160) { c_accent = '#7c3aed'; c_money = '#dc2626'; } 
-                  else if (hue >= 160 && hue < 260) { c_accent = '#ea580c'; c_money = '#be185d'; } 
-                  else { c_accent = '#059669'; c_money = '#0284c7'; } 
+    // Cập nhật Theme
+    updateTheme() {
+        if(!this.card) return;
+        const conf = this._config || {};
+        const bgType = conf.bg_type || 'gradient';
+        const bgOpacity = conf.bg_opacity !== undefined ? conf.bg_opacity : 70;
+        let stringForContrastCalc = ""; 
+        const applyOpacityToGradientStr = (str, opacity) => str.replace(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi, (match) => hexToRgba(match, opacity));
 
-              } else {
-                  c_text = '#ffffff'; c_text_dim = 'rgba(255,255,255,0.6)';
-                  c_block = `rgba(255, 255, 255, ${Math.max(0.05, op * 0.15)})`; c_option_bg = '#1e293b';
-                  
-                  if (s < 0.15) { c_accent = '#38bdf8'; c_money = '#fbbf24'; }
-                  else if (hue >= 330 || hue < 45) { c_accent = '#22d3ee'; c_money = '#34d399'; }
-                  else if (hue >= 45 && hue < 160) { c_accent = '#a78bfa'; c_money = '#f43f5e'; }
-                  else if (hue >= 160 && hue < 260) { c_accent = '#fb923c'; c_money = '#f472b6'; }
-                  else { c_accent = '#4ade80'; c_money = '#38bdf8'; }
-              }
-          }
-      } else {
-          c_text_dim = hexToRgba(c_text, 60);
-          c_option_bg = c_block;
-      }
+        if (bgType === 'gradient') {
+            const preset = conf.bg_gradient_preset || 'linear-gradient(135deg, #2b5876, #4e4376)';
+            if (preset === 'custom') {
+                const color1 = conf.bg_gradient_color1 || '#1e293b';
+                const color2 = conf.bg_gradient_color2 || '#0f172a';
+                const angle = conf.bg_gradient_angle !== undefined ? conf.bg_gradient_angle : 135;
+                this.card.style.background = `linear-gradient(${angle}deg, ${hexToRgba(color1, bgOpacity)}, ${hexToRgba(color2, bgOpacity)})`;
+                stringForContrastCalc = `${color1} ${color2}`;
+            } else {
+                this.card.style.background = applyOpacityToGradientStr(preset, bgOpacity);
+                stringForContrastCalc = preset;
+            }
+        } else {
+            const bgColor = conf.bg_color || '#1e293b';
+            this.card.style.background = hexToRgba(bgColor, bgOpacity);
+            stringForContrastCalc = bgColor;
+        }
 
-      const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
+        const borderEnabled = conf.border_enable !== undefined ? conf.border_enable : false;
+        if (borderEnabled) {
+            const borderWidth = conf.border_width !== undefined ? conf.border_width : 1;
+            const borderOpacity = conf.border_opacity !== undefined ? conf.border_opacity : 10;
+            const borderColor = conf.border_color || '#ffffff';
+            this.card.style.border = (borderOpacity > 0 && borderWidth > 0) ? `${borderWidth}px solid ${hexToRgba(borderColor, borderOpacity)}` : 'none';
+        } else { this.card.style.border = 'none'; }
 
-      const tabHistoryClass = this._activeTab === 'history' ? 'active' : '';
-      const tabSearchClass = this._activeTab === 'search' ? 'active' : '';
-      const tabAddClass = this._activeTab === 'add' ? 'active' : '';
+        const shadowEnabled = conf.shadow_enable !== undefined ? conf.shadow_enable : false;
+        if (shadowEnabled) {
+            const shadowColor = conf.shadow_color || '#000000';
+            const shadowOpacity = conf.shadow_opacity !== undefined ? conf.shadow_opacity : 20;
+            const blur = conf.shadow_blur !== undefined ? conf.shadow_blur : 32;
+            const offsetX = conf.shadow_offset_x !== undefined ? conf.shadow_offset_x : 0;
+            const offsetY = conf.shadow_offset_y !== undefined ? conf.shadow_offset_y : 8;
+            this.card.style.boxShadow = `${offsetX}px ${offsetY}px ${blur}px ${hexToRgba(shadowColor, shadowOpacity)}`;
+        } else { this.card.style.boxShadow = 'none'; }
+        
+        this.card.style.backdropFilter = "blur(16px)";
+        this.card.style.webkitBackdropFilter = "blur(16px)";
+        this.card.style.borderRadius = "var(--ha-card-border-radius, 16px)";
+        this.card.style.padding = "clamp(12px, 3vw, 16px)";
+        this.card.style.height = `${conf.card_height || 600}px`;
+        this.card.style.display = 'flex';
+        this.card.style.flexDirection = 'column';
+        this.card.style.overflow = "hidden";
 
-      const pIdx = this._profileNames.indexOf(this._currentProfile);
-      const prevOpacity = pIdx > 0 ? 0.8 : 0.2;
-      const prevPointer = pIdx > 0 ? 'auto' : 'none';
-      const nextOpacity = pIdx < this._profileNames.length - 1 ? 0.8 : 0.2;
-      const nextPointer = pIdx < this._profileNames.length - 1 ? 'auto' : 'none';
+        let c_text = conf.textColor || '#f8fafc';
+        let c_accent = conf.accentColor || '#0ea5e9';
+        let c_money = conf.moneyColor || '#38bdf8';
+        let c_block = conf.blockBg || 'rgba(255, 255, 255, 0.05)';
+        let c_text_dim = '', c_option_bg = '';
 
-      let topBarHtml = `
-        <div class="top-bar fade-in">
+        if (conf.auto_contrast !== false) { 
+            const hexRegex = /#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/gi;
+            let match, colorsToCheck = [];
+            while ((match = hexRegex.exec(stringForContrastCalc)) !== null) {
+                let hex = match[1];
+                if (hex.length === 3) hex = hex.split('').map(x => x+x).join('');
+                colorsToCheck.push({ r: parseInt(hex.substring(0,2), 16), g: parseInt(hex.substring(2,4), 16), b: parseInt(hex.substring(4,6), 16) });
+            }
+            const rgbRegex = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/gi;
+            while ((match = rgbRegex.exec(stringForContrastCalc)) !== null) {
+                colorsToCheck.push({ r: parseInt(match[1], 10), g: parseInt(match[2], 10), b: parseInt(match[3], 10) });
+            }
+
+            if (colorsToCheck.length > 0) {
+                let avgR = 0, avgG = 0, avgB = 0;
+                colorsToCheck.forEach(c => { avgR += c.r; avgG += c.g; avgB += c.b; });
+                avgR = Math.round(avgR / colorsToCheck.length);
+                avgG = Math.round(avgG / colorsToCheck.length);
+                avgB = Math.round(avgB / colorsToCheck.length);
+
+                let isDarkTheme = (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) ? this._hass.themes.darkMode : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+                const op = bgOpacity / 100;
+                const baseBg = isDarkTheme ? 30 : 245; 
+                const effR = Math.round(avgR * op + baseBg * (1 - op));
+                const effG = Math.round(avgG * op + baseBg * (1 - op));
+                const effB = Math.round(avgB * op + baseBg * (1 - op));
+
+                const yiq = ((effR * 299) + (effG * 587) + (effB * 114)) / 1000;
+                const isLightBackground = yiq >= 135;
+
+                let r = effR / 255, g = effG / 255, b = effB / 255;
+                let max = Math.max(r, g, b), min = Math.min(r, g, b);
+                let h, s, l = (max + min) / 2;
+                if (max == min) { h = s = 0; }
+                else {
+                    let d = max - min;
+                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    switch(max) {
+                        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                        case g: h = (b - r) / d + 2; break;
+                        case b: h = (r - g) / d + 4; break;
+                    }
+                    h /= 6;
+                }
+                let hue = Math.round(h * 360);
+
+                if (isLightBackground) {
+                    c_text = '#1a1a1a'; c_text_dim = 'rgba(0,0,0,0.6)';
+                    c_block = `rgba(0, 0, 0, ${Math.max(0.04, op * 0.1)})`; c_option_bg = '#ffffff';
+                    if (s < 0.15) { c_accent = '#0ea5e9'; c_money = '#ea580c'; }
+                    else if (hue >= 330 || hue < 45) { c_accent = '#0891b2'; c_money = '#059669'; } 
+                    else if (hue >= 45 && hue < 160) { c_accent = '#7c3aed'; c_money = '#dc2626'; } 
+                    else if (hue >= 160 && hue < 260) { c_accent = '#ea580c'; c_money = '#be185d'; } 
+                    else { c_accent = '#059669'; c_money = '#0284c7'; } 
+                } else {
+                    c_text = '#ffffff'; c_text_dim = 'rgba(255,255,255,0.6)';
+                    c_block = `rgba(255, 255, 255, ${Math.max(0.05, op * 0.15)})`; c_option_bg = '#1e293b';
+                    if (s < 0.15) { c_accent = '#38bdf8'; c_money = '#fbbf24'; }
+                    else if (hue >= 330 || hue < 45) { c_accent = '#22d3ee'; c_money = '#34d399'; }
+                    else if (hue >= 45 && hue < 160) { c_accent = '#a78bfa'; c_money = '#f43f5e'; }
+                    else if (hue >= 160 && hue < 260) { c_accent = '#fb923c'; c_money = '#f472b6'; }
+                    else { c_accent = '#4ade80'; c_money = '#38bdf8'; }
+                }
+            }
+        } else {
+            c_text_dim = hexToRgba(c_text, 60);
+            c_option_bg = c_block;
+        }
+
+        this.card.style.setProperty('--text-main', c_text);
+        this.card.style.setProperty('--text-dim', c_text_dim);
+        this.card.style.setProperty('--accent', c_accent);
+        this.card.style.setProperty('--money', c_money);
+        this.card.style.setProperty('--block-bg', c_block);
+        this.card.style.setProperty('--option-bg', c_option_bg);
+        this.card.style.setProperty('--glass-border', hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2));
+    }
+
+    // Các hàm render HTML Module
+    renderHeaderAndTabs() {
+        if(!this._els) return;
+        const conf = this._config || {};
+        const title = conf.title || "Quản Lý Mua Sắm";
+        const configIcon = conf.icon || "mdi:cart-outline";
+        const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
+
+        this._els.header.innerHTML = `${iconHtml} ${title}`;
+
+        const pIdx = this._profileList.findIndex(p => p.id === this._currentProfileId);
+        const prevOpacity = pIdx > 0 ? 0.8 : 0.2;
+        const prevPointer = pIdx > 0 ? 'auto' : 'none';
+        const nextOpacity = pIdx < this._profileList.length - 1 ? 0.8 : 0.2;
+        const nextPointer = pIdx < this._profileList.length - 1 ? 'auto' : 'none';
+
+        this._els.topbar.innerHTML = `
             <div class="profile-selector">
                 <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
                 <div class="profile-info-wrapper">
                     <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
                     <select id="profile-select">
-                        ${this._profileNames.length > 0 
-                            ? this._profileNames.map(p => `<option value="${p}" ${this._currentProfile === p ? 'selected' : ''}>${p}</option>`).join('')
+                        ${this._profileList.length > 0 
+                            ? this._profileList.map(p => `<option value="${p.id}" ${this._currentProfileId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')
                             : `<option value="">Chưa có dữ liệu</option>`
                         }
                     </select>
@@ -956,17 +1139,46 @@
                 <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
             </div>
             
-            <div class="tab search-tab-btn ${tabSearchClass}" data-target="search" title="Tra cứu & Bảo hành">
+            <div class="tab search-tab-btn ${this._activeTab === 'search' ? 'active' : ''}" data-target="search" title="Tra cứu & Bảo hành">
                 <ha-icon icon="mdi:magnify" style="flex-shrink: 0;"></ha-icon>
                 <span class="st-text">Tra cứu</span>
             </div>
-        </div>
-      `;
+        `;
 
-      let contentHtml = '';
+        this._els.tabs.innerHTML = `
+           <div class="tab ${this._activeTab === 'history' ? 'active' : ''}" data-target="history">📋 Lịch sử</div>
+           <div class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm mới</div>
+        `;
+    }
 
+    switchTab(tabName) {
+      this._activeTab = tabName;
+      this._expandedOrderId = null;
+      this._historyPage = 1;
+      this._searchPage = 1;
+      this._warrantyPage = 1;
+      this.renderHeaderAndTabs();
+      this.renderContent();
+    }
+
+    renderContent() {
+      if(!this._els) return;
       if (this._activeTab === 'history') {
-        
+          this._els.content.innerHTML = this.getHistoryHTML();
+      } else if (this._activeTab === 'search') {
+          this._els.content.innerHTML = this.getSearchHTML();
+          // Render màu thanh trượt khởi tạo
+          const wSlider = this.card.querySelector('#warranty-slider');
+          if(wSlider) {
+              const percent = (wSlider.value / 365) * 100;
+              wSlider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${percent}%, rgba(255,255,255,0.1) ${percent}%, rgba(255,255,255,0.1) 100%)`;
+          }
+      } else if (this._activeTab === 'add') {
+          this._els.content.innerHTML = this.getAddHTML();
+      }
+    }
+
+    getHistoryHTML() {
         const yIdx = this._availableYears.indexOf(this._selectedYear);
         const yPrevDisabled = yIdx >= this._availableYears.length - 1 || this._availableYears.length === 0 ? 'disabled' : '';
         const yNextDisabled = yIdx <= 0 || this._availableYears.length === 0 ? 'disabled' : '';
@@ -977,10 +1189,7 @@
         const mPrevDisabled = mIdx <= 0 ? 'disabled' : '';
         const mNextDisabled = mIdx >= mArr.length - 1 ? 'disabled' : '';
 
-        const startIdx = (this._historyPage - 1) * this._itemsPerPage;
-        const currentHistoryItems = this._items.slice(startIdx, startIdx + this._itemsPerPage);
-
-        contentHtml = `
+        return `
           <div class="controls fade-in">
             <div class="control-box">
               <ha-icon class="nav-btn ${yPrevDisabled}" id="prev-year" icon="mdi:chevron-left"></ha-icon>
@@ -999,13 +1208,22 @@
               <ha-icon class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
             </div>
           </div>
-
           <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
             <ha-icon icon="mdi:format-list-bulleted" style="font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
             Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear || '--'}` : `Tháng ${this._selectedMonth}/${this._selectedYear || '--'}`}
           </div>
+          <div id="history-dynamic-area" class="fade-in" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+            ${this.getHistoryDynamicHTML()}
+          </div>
+        `;
+    }
 
-          <div class="table-container fade-in">
+    getHistoryDynamicHTML() {
+        const startIdx = (this._historyPage - 1) * this._itemsPerPage;
+        const currentHistoryItems = this._items.slice(startIdx, startIdx + this._itemsPerPage);
+
+        return `
+          <div class="table-container">
             <div class="t-header">
               <div>Ngày</div><div>Thông tin SP</div><div style="text-align: right; padding-right: 32px;">Thành tiền</div>
             </div>
@@ -1021,8 +1239,7 @@
             </div>
             ${this.renderPagination(this._historyPage, this._items.length, 'history')}
           </div>
-
-          <div class="stats-container fade-in">
+          <div class="stats-container">
             <div class="stat-line">
               <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
               Tổng chi tiêu: <strong>${formatMoney(this._stats.total)} ₫</strong>
@@ -1033,9 +1250,43 @@
             </div>
           </div>
         `;
-      } 
-      else if (this._activeTab === 'search') {
-        
+    }
+
+    renderHistoryDynamic() {
+        const dArea = this.card.querySelector('#history-dynamic-area');
+        if(dArea) dArea.innerHTML = this.getHistoryDynamicHTML();
+    }
+
+    getSearchHTML() {
+        return `
+          <div class="search-tab-content fade-in">
+              <div class="search-box">
+                  <div class="s-input-group">
+                      <ha-icon icon="mdi:magnify"></ha-icon>
+                      <input type="text" id="search-input" value="${this._searchKeyword}" placeholder="Nhập tên SP, nơi mua, model...">
+                      ${this._searchKeyword ? `<ha-icon icon="mdi:close-circle" id="clear-search" class="clear-icon"></ha-icon>` : ''}
+                  </div>
+              </div>
+
+              <div class="warranty-box">
+                  <div class="w-header">
+                      <ha-icon icon="mdi:shield-alert-outline"></ha-icon> 
+                      Sắp hết bảo hành (dưới <span class="w-hl" id="warranty-days-text">${this._warrantyDays}</span> ngày)
+                  </div>
+                  <div class="w-slider-container">
+                      <input type="range" id="warranty-slider" min="0" max="365" value="${this._warrantyDays}" class="modern-slider">
+                      <div class="w-ticks"><span>0</span><span>90</span><span>180</span><span>270</span><span>365</span></div>
+                  </div>
+              </div>
+              
+              <div id="search-dynamic-area" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+                  ${this.getSearchDynamicHTML()}
+              </div>
+          </div>
+        `;
+    }
+
+    getSearchDynamicHTML() {
         let keywordResults = [];
         if (this._searchKeyword.trim() !== '') {
             const kw = this._searchKeyword.toLowerCase().trim();
@@ -1063,61 +1314,47 @@
         const startWarranty = (this._warrantyPage - 1) * this._itemsPerPage;
         const currentWarrantyItems = warrantyResults.slice(startWarranty, startWarranty + this._itemsPerPage);
 
-        contentHtml = `
-          <div class="search-tab-content fade-in">
-              <div class="search-box">
-                  <div class="s-input-group">
-                      <ha-icon icon="mdi:magnify"></ha-icon>
-                      <input type="text" id="search-input" value="${this._searchKeyword}" placeholder="Nhập tên SP, nơi mua, model...">
-                      ${this._searchKeyword ? `<ha-icon icon="mdi:close-circle" id="clear-search" class="clear-icon"></ha-icon>` : ''}
-                  </div>
-              </div>
+        return `
+            ${this._searchKeyword ? `
+            <div class="table-container fade-in-fast" style="margin-bottom: 16px; flex: none;">
+                <div class="t-header search-header">
+                  <div>Ngày mua</div><div>Kết quả tìm kiếm (${keywordResults.length})</div><div style="text-align: right;">Thành tiền</div>
+                </div>
+                <div class="table-wrapper">
+                    ${this.renderTableRows(currentSearchItems, true)}
+                </div>
+                ${this.renderPagination(this._searchPage, keywordResults.length, 'search')}
+            </div>` : ''}
 
-              ${this._searchKeyword ? `
-              <div class="table-container fade-in-fast" style="margin-bottom: 16px; flex: none;">
-                  <div class="t-header search-header">
-                    <div>Ngày mua</div><div>Kết quả tìm kiếm (${keywordResults.length})</div><div style="text-align: right;">Thành tiền</div>
-                  </div>
-                  <div class="table-wrapper">
-                      ${this.renderTableRows(currentSearchItems, true)}
-                  </div>
-                  ${this.renderPagination(this._searchPage, keywordResults.length, 'search')}
-              </div>` : ''}
-
-              <div class="warranty-box">
-                  <div class="w-header">
-                      <ha-icon icon="mdi:shield-alert-outline"></ha-icon> 
-                      Sắp hết bảo hành (dưới <span class="w-hl">${this._warrantyDays}</span> ngày)
-                  </div>
-                  <div class="w-slider-container">
-                      <input type="range" id="warranty-slider" min="0" max="365" value="${this._warrantyDays}" class="modern-slider">
-                      <div class="w-ticks"><span>0</span><span>90</span><span>180</span><span>270</span><span>365</span></div>
-                  </div>
-              </div>
-
-              <div class="table-container fade-in-fast" style="flex:1;">
-                  <div class="t-header warranty-header">
-                    <div>Ngày mua</div><div>Đang trong hạn (${warrantyResults.length})</div><div style="text-align: right;">Thành tiền</div>
-                  </div>
-                  <div class="table-wrapper">
-                      ${this.renderTableRows(currentWarrantyItems, true)}
-                  </div>
-                  ${this.renderPagination(this._warrantyPage, warrantyResults.length, 'warranty')}
-              </div>
-          </div>
+            <div class="table-container fade-in-fast" style="flex:1;">
+                <div class="t-header warranty-header">
+                  <div>Ngày mua</div><div>Đang trong hạn (${warrantyResults.length})</div><div style="text-align: right;">Thành tiền</div>
+                </div>
+                <div class="table-wrapper">
+                    ${this.renderTableRows(currentWarrantyItems, true)}
+                </div>
+                ${this.renderPagination(this._warrantyPage, warrantyResults.length, 'warranty')}
+            </div>
         `;
-      }
-      else if (this._activeTab === 'add') {
+    }
+
+    renderSearchDynamic() {
+        const sArea = this.card.querySelector('#search-dynamic-area');
+        if(sArea) sArea.innerHTML = this.getSearchDynamicHTML();
+    }
+
+    getAddHTML() {
         const catOptions = Array.from(this._uniqueCategories).sort().map(c => `<option value="${c}">`).join('');
         const placeOptions = Array.from(this._uniquePlaces).sort().map(p => `<option value="${p}">`).join('');
         const mfgOptions = Array.from(this._uniqueManufacturers).sort().map(m => `<option value="${m}">`).join('');
-        
         const todayStr = new Date().toISOString().split('T')[0];
+        
+        const activeProfileName = this._profilesData[this._currentProfileId]?.name || 'Hồ sơ mặc định';
 
-        contentHtml = `
+        return `
           <div class="add-tab-wrapper fade-in">
           <form id="add-order-form">
-            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${this._currentProfile || 'Hồ sơ mặc định'}</div>
+            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${activeProfileName}</div>
             
             <datalist id="cat-list">${catOptions}</datalist>
             <datalist id="place-list">${placeOptions}</datalist>
@@ -1201,9 +1438,73 @@
           </form>
           </div>
         `;
-      }
-      
-      const modalHtml = this._showDeleteModal ? `
+    }
+
+    renderTableRows(itemsArray, isSearchMode = false) {
+       if (itemsArray.length === 0) return `<div style="text-align:center; padding: 20px; color: var(--text-dim);">Không có đơn hàng nào.</div>`;
+       
+       return itemsArray.map(item => {
+          const bhStatus = this.checkWarrantyStatus(item.ngay_het_bh);
+          const isExpanded = this._expandedOrderId === item.id;
+          
+          let dateStr = isSearchMode ? formatDate(item.ngay_mua) : (formatDate(item.ngay_mua).split('/').length >= 2 ? `${formatDate(item.ngay_mua).split('/')[0]}/${formatDate(item.ngay_mua).split('/')[1]}` : formatDate(item.ngay_mua));
+
+          return `
+          <div class="t-row-container">
+              <div class="t-row ${isExpanded ? 'expanded' : ''}" data-id="${item.id}">
+                <div class="col-date" style="${isSearchMode ? 'font-size: 10px;' : ''}">
+                  <div>${dateStr}</div>
+                  <div class="d-id">ID: ${item.id}</div>
+                </div>
+                <div class="col-info">
+                  <div class="info-name">${item.ten_hang}</div>
+                  <div class="info-sub">
+                      ${item.thoi_gian_bh_thang ? item.thoi_gian_bh_thang + ' tháng' : 'Không BH'} | 
+                      <span class="warranty-date ${bhStatus.class}">${bhStatus.text}</span>
+                  </div>
+                </div>
+                <div class="col-price">
+                  <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
+                  <div class="price-qty">SL: ${item.so_luong}</div>
+                </div>
+                ${!isSearchMode ? `
+                <div class="col-action">
+                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
+                </div>` : ''}
+              </div>
+              
+              <div class="row-details slide-down" style="display: ${isExpanded ? 'block' : 'none'};">
+                 <div class="detail-grid">
+                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${item.noi_mua || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${item.nganh_hang || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.manufacturer || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat || 0}%</span></div>
+                 </div>
+              </div>
+          </div>
+        `}).join('');
+    }
+
+    renderPagination(currentPage, totalItems, type) {
+        const totalPages = Math.ceil(totalItems / this._itemsPerPage);
+        if (totalPages <= 1) return ''; 
+
+        return `
+          <div class="pagination-container">
+            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="1" icon="mdi:chevron-double-left"></ha-icon>
+            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage - 1}" icon="mdi:chevron-left"></ha-icon>
+            <div class="page-info">${currentPage} / ${totalPages}</div>
+            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage + 1}" icon="mdi:chevron-right"></ha-icon>
+            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${totalPages}" icon="mdi:chevron-double-right"></ha-icon>
+          </div>
+        `;
+    }
+
+    openDeleteModal(orderId) {
+       this._itemToDelete = orderId;
+       this._els.modal.innerHTML = `
         <div class="custom-modal-overlay fade-in-fast">
             <div class="custom-modal zoom-in">
                 <ha-icon icon="mdi:alert-circle-outline" style="color: #ef4444; font-size: 54px; margin-bottom: 8px;"></ha-icon>
@@ -1215,303 +1516,67 @@
                 </div>
             </div>
         </div>
-      ` : '';
+       `;
+    }
 
-      let html = `
-        <style>
-          :host {
-            --text-main: ${c_text};
-            --text-dim: ${c_text_dim};
-            --accent: ${c_accent};
-            --money: ${c_money};
-            --block-bg: ${c_block};
-            --option-bg: ${c_option_bg};
-            --glass-border: ${hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2)};
-          }
+    closeDeleteModal() {
+       this._itemToDelete = null;
+       this._els.modal.innerHTML = '';
+    }
 
-          ::-webkit-scrollbar { width: 6px; height: 6px; }
-          ::-webkit-scrollbar-track { background: transparent; }
-          ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
-          ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
-
-          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
-          .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
-
-          .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; width: 100%; box-sizing: border-box;}
-          .profile-selector { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 8px; border: 1px solid var(--glass-border); margin: 0;}
-          .profile-info-wrapper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; }
-          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
-          .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
-          .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px; flex-shrink: 0;}
-          .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
-          
-          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
-          .search-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
-          .search-tab-btn:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
-          
-          @media (max-width: 420px) { .st-text { display: none; } .search-tab-btn { padding: 0 10px; } }
-
-          /* TAB CHÍNH */
-          .tabs { display: flex; gap: 8px; margin-bottom: 12px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); flex-shrink: 0;}
-          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
-          .tabs .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-          .tabs .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
-
-          .tab-content-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-
-          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
-          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
-          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
-          .control-box select option { background-color: var(--option-bg); color: var(--text-main); }
-          .nav-btn { color: var(--text-dim); cursor: pointer; transition: 0.2s; font-size: 24px; }
-          .nav-btn:hover:not(.disabled) { color: var(--accent); transform: scale(1.1); }
-          .nav-btn.disabled { opacity: 0.2; pointer-events: none; }
-
-          .stats-container { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;}
-          .stat-line { display: flex; align-items: center; gap: 8px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
-          .stat-line strong { color: var(--money); font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
-          .stat-line .val-qty { color: #fbbf24; }
-
-          .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
-          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
-          .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
-          
-          .table-wrapper { flex: 1; overflow: hidden; } 
-
-          .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
-          .t-row-container:last-child { border-bottom: none; }
-          
-          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
-          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
-
-          .t-row:hover { background: rgba(255, 255, 255, 0.08); }
-          .t-row.expanded { background: rgba(0, 0, 0, 0.15); }
-          
-          .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
-          .col-date .d-id { font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
-          .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden; pointer-events: none;}
-          .info-name { font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          .info-sub { font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          
-          .warranty-date.expired-warranty { opacity: 0.5; text-decoration: line-through; }
-          .warranty-date.valid-warranty { color: var(--accent); font-weight: 600; }
-          .warranty-date.expiring-soon { font-weight: 800; animation: pulse-danger 1.5s infinite; }
-          @keyframes pulse-danger { 0% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } 50% { color: #ef4444; text-shadow: 0 0 12px rgba(239, 68, 68, 0.8); } 100% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } }
-
-          .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden; pointer-events: none;}
-          .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
-          .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
-          
-          .col-action { display: flex; align-items: center; justify-content: center; z-index: 2; }
-          .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px; padding: 4px;}
-          .btn-delete:hover { opacity: 1; transform: scale(1.1);}
-
-          .row-details { background: rgba(0,0,0,0.2); padding: 6px 10px; color: var(--text-main); border-top: 1px dashed var(--glass-border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
-          .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
-          .d-item { display: flex; flex-direction: column; }
-          .d-lbl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 600;}
-          .d-val { font-size: 11px; font-weight: 500; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          .slide-down { animation: slideDownFast 0.2s ease-out forwards; transform-origin: top; }
-          @keyframes slideDownFast { from { opacity: 0; transform: scaleY(0.9); } to { opacity: 1; transform: scaleY(1); } }
-
-          .pagination-container { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 6px; border-top: 1px solid var(--glass-border); background: rgba(0,0,0,0.15); flex-shrink: 0;}
-          .page-btn { cursor: pointer; color: var(--text-main); opacity: 0.6; transition: 0.2s; font-size: 24px; padding: 2px; border-radius: 4px; }
-          .page-btn:hover:not(.disabled) { opacity: 1; color: var(--accent); background: rgba(255,255,255,0.05); }
-          .page-btn.disabled { opacity: 0.15; cursor: default; }
-          .page-info { font-size: 11px; font-weight: 700; color: var(--text-dim); background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); }
-
-          .search-tab-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding-right: 4px;}
-          .search-box { background: var(--block-bg); border-radius: 12px; padding: 12px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 12px; }
-          .s-input-group { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--glass-border); transition: 0.2s;}
-          .s-input-group:focus-within { border-color: var(--accent); background: rgba(0,0,0,0.25); }
-          .s-input-group ha-icon { color: var(--text-dim); }
-          .s-input-group input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-main); font-size: 14px; font-family: inherit;}
-          .clear-icon { cursor: pointer; color: var(--text-dim) !important; transition: 0.2s; }
-          .clear-icon:hover { color: #ef4444 !important; }
-
-          .warranty-box { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 16px; }
-          .w-header { font-size: 14px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 8px; margin-bottom: 16px;}
-          .w-header ha-icon { color: #facc15; }
-          .w-hl { color: var(--accent); font-weight: 800; font-size: 16px;}
-          
-          .w-slider-container { width: 100%; position: relative;}
-          .modern-slider { -webkit-appearance: none; width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; outline: none; opacity: 0.9; transition: opacity .2s; }
-          .modern-slider:hover { opacity: 1; }
-          .modern-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.5); transition: 0.2s; border: 2px solid #fff;}
-          .modern-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
-          .w-ticks { display: flex; justify-content: space-between; padding: 0 4px; margin-top: 8px; font-size: 10px; color: var(--text-dim); font-weight: 600;}
-
-          .custom-modal-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; border-radius: var(--ha-card-border-radius, 16px); }
-          .custom-modal { background: var(--block-bg); border: 1px solid var(--glass-border); padding: 24px; border-radius: 16px; width: 85%; max-width: 300px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); color: var(--text-main); }
-          .custom-modal h3 { margin: 0 0 12px 0; font-size: 18px; color: var(--text-main); }
-          .custom-modal p { margin: 0 0 20px 0; font-size: 14px; color: var(--text-dim); line-height: 1.4; }
-          .modal-actions { display: flex; gap: 12px; justify-content: center; }
-          .btn-modal-cancel, .btn-modal-confirm { flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; transition: 0.2s; font-size: 14px; }
-          .btn-modal-cancel { background: rgba(255,255,255,0.1); color: var(--text-main); }
-          .btn-modal-cancel:hover { background: rgba(255,255,255,0.2); }
-          .btn-modal-confirm { background: #ef4444; color: white; }
-          .btn-modal-confirm:hover { background: #dc2626; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
-
-          .add-tab-wrapper { overflow-y: auto; flex: 1; padding-right: 4px;}
-          form { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); }
-          .form-title { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
-          .form-row { margin-bottom: 12px; }
-          .form-row.split { display: flex; gap: 12px; }
-          
-          /* [FIX] Thêm min-width: 0 và thiết lập giới hạn cho input/select */
-          .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-          .f-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
-          .f-group input, .f-group select { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
-          .f-group input:focus, .f-group select:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
-          
-          input::-webkit-calendar-picker-indicator { opacity: 0.5; filter: invert(0.8); cursor: pointer; }
-          input:hover::-webkit-calendar-picker-indicator { opacity: 1; }
-          .f-group select option { background: var(--option-bg); color: var(--text-main); }
-          .form-details-toggle { font-size: 13px; color: var(--accent); text-align: center; cursor: pointer; margin: 8px 0; display: flex; justify-content: center; align-items: center; gap: 4px; opacity: 0.8;}
-          .form-details-toggle:hover { opacity: 1; }
-          .btn-primary { background: var(--accent); color: #fff; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-family: inherit;}
-          .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-          
-          .empty-state-nice { text-align: center; padding: 32px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px;}
-          .empty-state-nice ha-icon { font-size: 64px; color: var(--text-dim); opacity: 0.5; margin-bottom: 8px;}
-          .empty-title { font-size: 18px; font-weight: 700; color: var(--text-main); }
-          .empty-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; max-width: 80%; line-height: 1.4;}
-
-          .fade-in { animation: fadeIn 0.3s ease-out forwards; }
-          .fade-in-fast { animation: fadeIn 0.15s ease-out forwards; }
-          .zoom-in { animation: zoomIn 0.2s ease-out forwards; }
-          @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-          @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-        </style>
-
-        <div class="header">
-          ${iconHtml} ${title}
-        </div>
-
-        ${topBarHtml}
-        
-        <div class="tabs">
-           <div class="tab ${tabHistoryClass}" data-target="history">📋 Lịch sử</div>
-           <div class="tab ${tabAddClass}" data-target="add">➕ Thêm mới</div>
-        </div>
-
-        <div class="tab-content-area">
-          ${contentHtml}
-        </div>
-        
-        ${modalHtml}
-      `;
-
-      this.card.innerHTML = html;
-
-      this.card.querySelectorAll('.page-btn:not(.disabled)').forEach(btn => {
-         btn.addEventListener('click', (e) => {
-             const type = e.currentTarget.getAttribute('data-type');
-             const newPage = parseInt(e.currentTarget.getAttribute('data-page'));
-             this._expandedOrderId = null; 
-
-             if (type === 'history') this._historyPage = newPage;
-             if (type === 'search') this._searchPage = newPage;
-             if (type === 'warranty') this._warrantyPage = newPage;
-             
-             this.updateView();
-         });
-      });
-
-      this.card.querySelectorAll('.tab').forEach(t => {
-        t.addEventListener('click', (e) => this.switchTab(e.currentTarget.getAttribute('data-target')));
-      });
-
-      const profSel = this.card.querySelector('#profile-select');
-      const prevProf = this.card.querySelector('#prev-profile');
-      const nextProf = this.card.querySelector('#next-profile');
-      if (profSel) profSel.addEventListener('change', (e) => { this._currentProfile = e.target.value; this.updateData(); });
-      if (prevProf) prevProf.addEventListener('click', () => { let idx = this._profileNames.indexOf(this._currentProfile); if (idx > 0) { this._currentProfile = this._profileNames[idx - 1]; this.updateData(); } });
-      if (nextProf) nextProf.addEventListener('click', () => { let idx = this._profileNames.indexOf(this._currentProfile); if (idx < this._profileNames.length - 1) { this._currentProfile = this._profileNames[idx + 1]; this.updateData(); } });
-
-      this.card.querySelectorAll('.t-row').forEach(row => {
-          row.addEventListener('click', (e) => {
-              const id = parseInt(e.currentTarget.getAttribute('data-id'));
-              const isExpanding = this._expandedOrderId !== id;
-              this._expandedOrderId = isExpanding ? id : null;
-              this.updateView();
-          });
-      });
-
-      if (this._activeTab === 'history') {
-        const ySel = this.card.querySelector('#year-select');
-        const mSel = this.card.querySelector('#month-select');
-        const btnEmpty = this.card.querySelector('#btn-empty-add');
-        const btnPrevYear = this.card.querySelector('#prev-year');
-        const btnNextYear = this.card.querySelector('#next-year');
-        const btnPrevMonth = this.card.querySelector('#prev-month');
-        const btnNextMonth = this.card.querySelector('#next-month');
-
-        if (ySel) ySel.addEventListener('change', (e) => { this._selectedYear = parseInt(e.target.value); this.updateData(); });
-        if (mSel) mSel.addEventListener('change', (e) => { this._selectedMonth = e.target.value; this.updateData(); });
-        if (btnEmpty) btnEmpty.addEventListener('click', () => this.switchTab('add'));
-        
-        if (btnPrevYear && !btnPrevYear.classList.contains('disabled')) btnPrevYear.addEventListener('click', () => { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.updateData(); });
-        if (btnNextYear && !btnNextYear.classList.contains('disabled')) btnNextYear.addEventListener('click', () => { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.updateData(); });
-        if (btnPrevMonth && !btnPrevMonth.classList.contains('disabled')) btnPrevMonth.addEventListener('click', () => { const mArr = ['all', ...this._availableMonths]; const currentM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(currentM); this._selectedMonth = mArr[idx - 1]; this.updateData(); });
-        if (btnNextMonth && !btnNextMonth.classList.contains('disabled')) btnNextMonth.addEventListener('click', () => { const mArr = ['all', ...this._availableMonths]; const currentM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(currentM); this._selectedMonth = mArr[idx + 1]; this.updateData(); });
-
-        this.card.querySelectorAll('.btn-delete').forEach(btn => {
-           btn.addEventListener('click', (e) => {
-             e.stopPropagation(); 
-             const id = parseInt(e.currentTarget.getAttribute('data-id'));
-             this.openDeleteModal(id);
-           });
-        });
-
-        const btnCancelDel = this.card.querySelector('#btn-cancel-del');
-        const btnConfirmDel = this.card.querySelector('#btn-confirm-del');
-        if (btnCancelDel) btnCancelDel.addEventListener('click', () => this.closeDeleteModal());
-        if (btnConfirmDel) btnConfirmDel.addEventListener('click', () => this.executeDelete());
-      } 
-      else if (this._activeTab === 'search') {
-          const searchInput = this.card.querySelector('#search-input');
-          const clearSearch = this.card.querySelector('#clear-search');
-          
-          if (searchInput) {
-              searchInput.addEventListener('input', (e) => {
-                  this._searchKeyword = e.target.value;
-                  this._searchPage = 1; 
-                  this.updateView(); 
-              });
-              setTimeout(() => {
-                  const input = this.card.querySelector('#search-input');
-                  if(input && this._searchKeyword) {
-                      input.focus();
-                      input.setSelectionRange(input.value.length, input.value.length);
-                  }
-              }, 10);
-          }
-          if (clearSearch) clearSearch.addEventListener('click', () => { this._searchKeyword = ''; this._searchPage = 1; this.updateView(); });
-
-          const wSlider = this.card.querySelector('#warranty-slider');
-          if (wSlider) wSlider.addEventListener('input', (e) => {
-              this._warrantyDays = parseInt(e.target.value);
-              this._warrantyPage = 1; 
-              this.updateView();
-          });
+    async executeDelete() {
+      const currentEid = this._profilesData[this._currentProfileId]?.map[this._selectedYear];
+      if(!currentEid) return;
+      
+      const orderId = this._itemToDelete;
+      
+      const entryId = await this.getEntryId(currentEid);
+      if (!entryId) {
+          alert("Hệ thống HA chưa cung cấp config_entry_id cho thực thể này.\n\nNguyên nhân có thể do kết nối chậm hoặc tài khoản không có quyền Admin. Vui lòng tải lại trang.");
+          this.closeDeleteModal();
+          return;
       }
-      else if (this._activeTab === 'add') {
-        const toggleBtn = this.card.querySelector('#toggle-details');
-        const detailContent = this.card.querySelector('#details-content');
-        if (toggleBtn && detailContent) {
-           toggleBtn.addEventListener('click', () => {
-              if (detailContent.style.display === 'none') {
-                 detailContent.style.display = 'block';
-                 toggleBtn.innerHTML = `<span>Ẩn thông tin chi tiết</span> <ha-icon icon="mdi:chevron-up"></ha-icon>`;
-              } else {
-                 detailContent.style.display = 'none';
-                 toggleBtn.innerHTML = `<span>Nhập thông tin chi tiết (Model, BH, VAT...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>`;
-              }
-           });
-        }
-        const form = this.card.querySelector('#add-order-form');
-        if (form) form.addEventListener('submit', (e) => this.handleAddSubmit(e));
+      
+      try {
+          await this._hass.callService('shopping_history', 'delete_order', { entry_id: entryId, order_id: orderId });
+          this.closeDeleteModal();
+      } catch(err) {
+          alert("Lỗi khi xóa từ Home Assistant: " + err.message);
+          this.closeDeleteModal();
+      }
+    }
+
+    async handleAddSubmit(formEl) {
+      const profileMap = this._profilesData[this._currentProfileId]?.map;
+      const currentEid = profileMap ? Object.values(profileMap)[0] : null; 
+      if (!currentEid) return alert("Chưa có dữ liệu cơ sở cho Hồ sơ này để tiến hành lưu!");
+
+      const entryId = await this.getEntryId(currentEid);
+      if (!entryId) return alert("Hệ thống chưa tải xong kết nối.\n\nVui lòng thử lại sau vài giây hoặc tải lại trang.");
+
+      const data = {
+          entry_id: entryId,
+          name: formEl.querySelector('#f_name').value,
+          place: formEl.querySelector('#f_place').value,
+          category: formEl.querySelector('#f_category').value,
+          price: parseFloat(formEl.querySelector('#f_price').value),
+          quantity: parseFloat(formEl.querySelector('#f_qty').value) || 1,
+          vat: parseFloat(formEl.querySelector('#f_vat').value) || 0,
+          status: formEl.querySelector('#f_status').value,
+          model: formEl.querySelector('#f_model').value || "",
+          manufacturer: formEl.querySelector('#f_manufacturer').value || "",
+          warranty_months: parseInt(formEl.querySelector('#f_warranty').value) || 0,
+      };
+
+      const pDate = formEl.querySelector('#f_date').value;
+      if (pDate) data.purchase_date = pDate;
+
+      try {
+          await this._hass.callService('shopping_history', 'add_order', data);
+          formEl.reset();
+          this.switchTab('history');
+      } catch(err) {
+          alert("Lỗi khi thêm: " + err.message);
       }
     }
   }
