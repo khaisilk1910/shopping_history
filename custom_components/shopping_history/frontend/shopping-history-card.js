@@ -146,7 +146,6 @@
       this.addListeners();
     }
 
-    // Fix lỗi WebView trên mobile: Bỏ sử dụng cú pháp Optional Chaining (?.)
     get _card_height() { return (this._config && this._config.card_height !== undefined) ? this._config.card_height : 600; }
     get _bg_type() { return (this._config && this._config.bg_type) ? this._config.bg_type : 'gradient'; }
     get _bg_color() { return (this._config && this._config.bg_color) ? this._config.bg_color : '#1e293b'; }
@@ -427,7 +426,6 @@
 
       let shoppingEntries = [];
       try {
-          // Lấy trực tiếp danh sách Config Entries để tạo Hồ Sơ kể cả khi Database trống (chưa có sensor)
           const entries = await this._hass.callWS({ type: 'config_entries/get' });
           this._configEntriesMap = {};
           shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
@@ -452,7 +450,6 @@
 
       const tempGroups = {};
 
-      // Khởi tạo các nhóm Profile trước từ thông tin Config Entries
       shoppingEntries.forEach(e => {
           tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
       });
@@ -522,7 +519,6 @@
 
       this._profileList.sort((a, b) => a.name.localeCompare(b.name));
       
-      // Fallback nếu ID hiện tại không tồn tại
       if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) {
           if (this._profileList.length > 0) {
               this._currentProfileId = this._profileList[0].id;
@@ -599,7 +595,6 @@
       this.renderContent();
     }
 
-    // --- TIỆN ÍCH HIỂN THỊ ---
     getDaysUntilExpiry(endDateStr) {
       if (!endDateStr) return null;
       const end = new Date(endDateStr);
@@ -617,7 +612,6 @@
       return { text: formatDate(endDateStr), class: 'valid-warranty' };
     }
 
-    // --- CẤU TRÚC RENDER MODULE ---
     renderInit() {
       if (!this.card) {
         this.card = document.createElement('ha-card');
@@ -824,30 +818,43 @@
                 return;
             }
 
-            const tRow = e.target.closest('.t-row');
             const btnDelete = e.target.closest('.btn-delete');
-            
             if (btnDelete) {
                 e.stopPropagation();
                 this.openDeleteModal(parseInt(btnDelete.dataset.id));
                 return;
             }
 
+            // Expand/Collapse Chi Tiết Đơn Hàng & Tính năng tự động đóng
+            const tRow = e.target.closest('.t-row');
+            const rowDetails = e.target.closest('.row-details');
+
+            // 1. Click ra ngoài bảng hoặc dòng dữ liệu -> Đóng toàn bộ các chi tiết đang mở
+            if (!tRow && !rowDetails) {
+                this.card.querySelectorAll('.t-row.expanded').forEach(r => {
+                    r.classList.remove('expanded');
+                    const d = r.nextElementSibling;
+                    if (d && d.classList.contains('row-details')) d.style.display = 'none';
+                });
+                this._expandedOrderId = null;
+            }
+
+            // 2. Click vào 1 dòng cụ thể
             if (tRow) {
                 const isExpanded = tRow.classList.contains('expanded');
                 const details = tRow.nextElementSibling;
-                const wrapper = tRow.closest('.table-wrapper');
-                
-                if (wrapper) {
-                    wrapper.querySelectorAll('.t-row.expanded').forEach(r => {
-                        if (r !== tRow) {
-                            r.classList.remove('expanded');
-                            const d = r.nextElementSibling;
-                            if (d && d.classList.contains('row-details')) d.style.display = 'none';
-                        }
-                    });
-                }
 
+                // Trước khi mở dòng mới, tự động ĐÓNG TẤT CẢ các dòng khác trên toàn bộ thẻ
+                // (Giúp đóng cả dòng bên bảng "Tra cứu" nếu click sang bảng "Bảo hành" và ngược lại)
+                this.card.querySelectorAll('.t-row.expanded').forEach(r => {
+                    if (r !== tRow) {
+                        r.classList.remove('expanded');
+                        const d = r.nextElementSibling;
+                        if (d && d.classList.contains('row-details')) d.style.display = 'none';
+                    }
+                });
+
+                // Xử lý mở/đóng dòng hiện tại được click
                 if (!isExpanded) {
                     tRow.classList.add('expanded');
                     if (details && details.classList.contains('row-details')) details.style.display = 'block';
@@ -942,7 +949,6 @@
         });
 
         this.card.addEventListener('submit', (e) => {
-            // FIX LỖI CRASH: Phải truyền đúng e.target (thẻ form) vào hàm handleAddSubmit thay vì biến e
             if (e.target.id === 'add-order-form') { e.preventDefault(); this.handleAddSubmit(e.target); }
         });
     }
@@ -1026,7 +1032,6 @@
                 avgG = Math.round(avgG / colorsToCheck.length);
                 avgB = Math.round(avgB / colorsToCheck.length);
 
-                // Fix khả năng tương thích webview cũ không nhận window.matchMedia
                 const prefersDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : false;
                 let isDarkTheme = (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) ? this._hass.themes.darkMode : prefersDark;
 
@@ -1502,7 +1507,6 @@
     }
 
     async executeDelete() {
-      // Dùng trực tiếp _currentProfileId làm entry_id
       const entryId = this._currentProfileId;
       if (!entryId) {
           alert("Không tìm thấy ID Hồ sơ!");
@@ -1522,7 +1526,6 @@
     }
 
     async handleAddSubmit(formEl) {
-      // Sử dụng trực tiếp _currentProfileId làm entryId, không cần lệ thuộc sensor
       const entryId = this._currentProfileId;
       if (!entryId) return alert("Hệ thống chưa tải xong kết nối hoặc chưa có Hồ sơ.\n\nVui lòng tải lại trang hoặc đợi một chút.");
 
