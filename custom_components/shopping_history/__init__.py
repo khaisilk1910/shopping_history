@@ -38,6 +38,7 @@ SERVICE_ADD_ORDER_SCHEMA = vol.Schema({
     vol.Optional("manufacturer", default=""): cv.string,
     vol.Optional("warranty_months", default=0): vol.Coerce(int),
     vol.Optional("purchase_date"): cv.string,
+    vol.Optional("note", default=""): cv.string,
 })
 
 SERVICE_DELETE_ORDER_SCHEMA = vol.Schema({
@@ -127,14 +128,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                     ten_hang, noi_mua, so_luong, don_gia, thanh_tien, 
                     vat_percent, tien_vat, thanh_tien_sau_vat, 
                     model, tinh_trang, nganh_hang, hang_sx, 
-                    thoi_gian_bh_thang, ngay_het_bh
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    thoi_gian_bh_thang, ngay_het_bh, ghi_chu
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 date_str, y, m, d,
                 data["name"], data["place"], data["quantity"], data["price"], total_pre_tax,
                 data["vat"], vat_amt, total_post_tax,
                 data["model"], data["status"], data["category"], data["manufacturer"],
-                data["warranty_months"], warranty_end_str
+                data["warranty_months"], warranty_end_str, data.get("note", "")
             ))
 
             conn.commit()
@@ -222,7 +223,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 nganh_hang TEXT,
                 hang_sx TEXT,
                 thoi_gian_bh_thang INTEGER,
-                ngay_het_bh TEXT
+                ngay_het_bh TEXT,
+                ghi_chu TEXT
             )
         """)
         
@@ -231,6 +233,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             columns = [info[1] for info in cursor.fetchall()]
             if "noi_mua" not in columns:
                 cursor.execute("ALTER TABLE purchases ADD COLUMN noi_mua TEXT DEFAULT ''")
+            if "ghi_chu" not in columns:
+                cursor.execute("ALTER TABLE purchases ADD COLUMN ghi_chu TEXT DEFAULT ''")
         except Exception as e:
             _LOGGER.error(f"Migration Error: {e}")
         
