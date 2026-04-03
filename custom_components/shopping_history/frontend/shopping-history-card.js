@@ -462,7 +462,7 @@
             state.attributes.danh_sach_chi_tiet.forEach(item => {
                 if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
                 if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
-                if (item.manufacturer) this._uniqueManufacturers.add(item.manufacturer.trim());
+                if (item.hang_sx) this._uniqueManufacturers.add(item.hang_sx.trim());
             });
         }
         
@@ -775,8 +775,8 @@
           
           .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
           .f-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
-          .f-group input, .f-group select { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
-          .f-group input:focus, .f-group select:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
+          .f-group input, .f-group select, .f-group textarea { width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit;}
+          .f-group input:focus, .f-group select:focus, .f-group textarea:focus { border-color: var(--accent); background: rgba(0,0,0,0.25); }
           
           input::-webkit-calendar-picker-indicator { opacity: 0.5; filter: invert(0.8); cursor: pointer; }
           input:hover::-webkit-calendar-picker-indicator { opacity: 1; }
@@ -898,7 +898,7 @@
                         toggleDetails.innerHTML = `<span>Ẩn thông tin chi tiết</span> <ha-icon icon="mdi:chevron-up"></ha-icon>`;
                     } else {
                         detailsContent.style.display = 'none';
-                        toggleDetails.innerHTML = `<span>Nhập thông tin chi tiết (Model, BH, VAT...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>`;
+                        toggleDetails.innerHTML = `<span>Nhập thông tin chi tiết (Model, BH, VAT, Ghi chú...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>`;
                     }
                 }
             }
@@ -1388,7 +1388,7 @@
             </div>
 
             <div class="form-details-toggle" id="toggle-details">
-              <span>Nhập thông tin chi tiết (Model, BH, VAT...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>
+              <span>Nhập thông tin chi tiết (Model, BH, VAT, Ghi chú...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>
             </div>
 
             <div class="form-details-content" id="details-content" style="display:none;">
@@ -1410,6 +1410,12 @@
                 <div class="f-group">
                   <label>Bảo hành (tháng)</label>
                   <input type="number" id="f_warranty" min="0" value="0">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="f-group">
+                  <label>Ghi chú</label>
+                  <textarea id="f_note" placeholder="Nhập ghi chú cho đơn hàng..." rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit; resize: vertical;"></textarea>
                 </div>
               </div>
             </div>
@@ -1460,9 +1466,10 @@
                     <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${item.noi_mua || '--'}</span></div>
                     <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${item.nganh_hang || '--'}</span></div>
                     <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.manufacturer || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.hang_sx || '--'}</span></div>
                     <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
                     <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat || 0}%</span></div>
+                    <div class="d-item" style="grid-column: 1 / -1; margin-top: 4px;"><span class="d-lbl">Ghi chú:</span> <span class="d-val" style="white-space: normal; line-height: 1.4;">${item.ghi_chu || '--'}</span></div>
                  </div>
               </div>
           </div>
@@ -1541,6 +1548,7 @@
           model: formEl.querySelector('#f_model').value || "",
           manufacturer: formEl.querySelector('#f_manufacturer').value || "",
           warranty_months: parseInt(formEl.querySelector('#f_warranty').value) || 0,
+          note: formEl.querySelector('#f_note').value || "",
       };
 
       const pDate = formEl.querySelector('#f_date').value;
