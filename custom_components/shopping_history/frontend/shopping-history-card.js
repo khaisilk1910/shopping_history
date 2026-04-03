@@ -22,11 +22,7 @@
     return hex; 
   };
 
-  // ==========================================
-  // 1. LỚP CHỈNH SỬA GIAO DIỆN UI (EDITOR)
-  // ==========================================
   class ShoppingHistoryEditor extends HTMLElement {
-    
     constructor() {
       super();
       this._config = {}; 
@@ -47,7 +43,6 @@
 
     render() {
       if (!this._hass) return;
-      
       const conf = this._config || {};
       const currentTitle = conf.title || "Quản Lý Mua Sắm";
       const currentIcon = conf.icon || "mdi:cart-outline";
@@ -65,7 +60,6 @@
           input[type=text], select.custom-input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, transparent); color: var(--primary-text-color); box-sizing: border-box; font-size: 14px;}
           .val-badge { background: var(--primary-color); color: var(--text-primary-color, white); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; min-width: 48px; text-align: center; }
           select.ha-select { background: var(--card-background-color, transparent); color: var(--primary-text-color); border: 1px solid var(--divider-color, #e0e0e0); padding: 6px 8px; border-radius: 6px; font-family: inherit; font-size: 14px; flex-grow: 1; max-width: 250px; cursor: pointer; }
-          
           .section { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 16px; margin-bottom: 16px; background: var(--card-background-color, transparent); box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: padding 0.3s ease; }
           .section.collapsed { padding-bottom: 16px; }
           .section-title { font-weight: 600; display: flex; align-items: center; justify-content: space-between; font-size: 16px; color: var(--primary-text-color); border-bottom: 1px solid var(--divider-color, #e0e0e0); padding-bottom: 8px; margin-bottom: 16px; cursor: pointer; user-select: none; }
@@ -79,65 +73,14 @@
           .section.collapsed .section-icon { transform: rotate(-90deg); }
           .title-left { display: flex; align-items: center; gap: 8px; pointer-events: none; }
           .title-right { display: flex; align-items: center; gap: 12px; }
-          
           @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         </style>
 
         <div class="editor-container">
           <div class="section"><div class="section-title no-collapse"><div class="title-left">⚙️ Cài đặt chung</div></div><div class="section-content"><div class="row-col"><span class="label">Tiêu đề thẻ</span><input type="text" id="title-input" class="custom-input config-trigger" value="${currentTitle}"></div><div class="row-col"><span class="label">Icon</span><input type="text" id="icon-input" class="custom-input config-trigger" value="${currentIcon}"></div><div class="row"><span class="label">Chiều cao thẻ (px)</span><input type="range" id="card_height" class="config-trigger" min="600" max="1000" step="50"><span class="val-badge" id="card_height_val"></span></div></div></div>
-          
-          <div class="section">
-              <div class="section-title"><div class="title-left">🎨 Nền (Background)</div><span class="section-icon">▼</span></div>
-              <div class="section-content">
-                  <div class="row"><span class="label">Loại nền</span><select id="bg_type" class="ha-select config-trigger"><option value="solid">Màu đơn sắc (Solid)</option><option value="gradient">Màu dải (Gradient)</option></select></div>
-                  <div class="row"><span class="label">Độ trong suốt (%)</span><input type="range" id="bg_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="bg_opacity_val"></span></div>
-                  
-                  <div id="solid_settings" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;">
-                      <div class="row"><span class="label">Màu nền</span><div class="input-group"><input type="color" id="bg_color" class="config-trigger"><span class="val-badge" id="bg_color_val"></span></div></div>
-                  </div>
-                  
-                  <div id="gradient_settings" style="display:none;">
-                      <div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;">
-                          <span class="label">Mẫu Gradient</span>
-                          <select id="bg_gradient_preset" class="ha-select config-trigger">
-                              <option value="linear-gradient(135deg, #f0f4f8, #d9e2ec)">☀️ Sáng mặc định (Màu zin)</option>
-                              <option value="linear-gradient(135deg, #1e293b, #0f172a)">🌙 Tối mặc định</option>
-                              <option value="linear-gradient(135deg, #141e30, #243b55)">🌌 Royal Night</option>
-                              <option value="linear-gradient(135deg, #0f2027, #203a43, #2c5364)">🌊 Deep Ocean</option>
-                              <option value="linear-gradient(135deg, #232526, #414345)">🏙️ Midnight City</option>
-                              <option value="linear-gradient(135deg, #1a1a1a, #000000)">⚫ Dark Elegance</option>
-                              <option value="linear-gradient(135deg, #ff0099, #493240)">🔮 Cosmic Fusion</option>
-                              <option value="linear-gradient(135deg, #ff512f, #dd2476)">🌅 Sunset Vibes</option>
-                              <option value="linear-gradient(135deg, #134e5e, #71b280)">🌲 Forest Mist</option>
-                              <option value="linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))">🪟 Glassmorphism</option>
-                              <option value="linear-gradient(135deg, #0f0c29, #302b63, #24243e)">🚀 Deep Space</option>
-                              <option value="linear-gradient(135deg, #667eea, #764ba2)">💜 Plum Plate</option>
-                              <option value="linear-gradient(135deg, #ff9a9e, #fecfef)">🌸 Cherry Blossom</option>
-                              <option value="linear-gradient(135deg, #f12711, #f5af19)">🔥 Fire Glow</option>
-                              <option value="linear-gradient(135deg, #11998e, #38ef7d)">🌿 Neon Life</option>
-                              <option value="linear-gradient(135deg, #00c6ff, #0072ff)">❄️ Winter Sky</option>
-                              <option value="linear-gradient(135deg, #f6d365, #fda085)">🍑 Sunrise Peach</option>
-                              <option value="linear-gradient(135deg, #9D50BB, #6E48AA)">💎 Amethyst</option>
-                              <option value="linear-gradient(135deg, #2b5876, #4e4376)">🌠 Starry Night</option>
-                              <option value="linear-gradient(135deg, #ff758c, #ff7eb3)">🍉 Sweet Pink</option>
-                              <option value="linear-gradient(135deg, #4facfe, #00f2fe)">🏝️ Tropical Blue</option>
-                              <option value="linear-gradient(135deg, #870000, #190a05)">🍷 Blood Moon</option>
-                              <option value="custom">✍️ Tùy chỉnh (Custom)</option>
-                          </select>
-                      </div>
-                      <div id="custom_gradient_row" style="display:none; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--divider-color, #e0e0e0);">
-                          <div class="row" style="width:100%;"><span class="label">Màu 1</span><div class="input-group"><input type="color" id="bg_gradient_color1" class="config-trigger"><span class="val-badge" id="bg_gradient_color1_val"></span></div></div>
-                          <div class="row" style="width:100%;"><span class="label">Màu 2</span><div class="input-group"><input type="color" id="bg_gradient_color2" class="config-trigger"><span class="val-badge" id="bg_gradient_color2_val"></span></div></div>
-                          <div class="row" style="width:100%;"><span class="label">Góc độ (°)</span><input type="range" id="bg_gradient_angle" class="config-trigger" min="0" max="360" step="1"><span class="val-badge" id="bg_gradient_angle_val"></span></div>
-                      </div>
-                  </div>
-              </div>
-          </div>
-
+          <div class="section"><div class="section-title"><div class="title-left">🎨 Nền (Background)</div><span class="section-icon">▼</span></div><div class="section-content"><div class="row"><span class="label">Loại nền</span><select id="bg_type" class="ha-select config-trigger"><option value="solid">Màu đơn sắc (Solid)</option><option value="gradient">Màu dải (Gradient)</option></select></div><div class="row"><span class="label">Độ trong suốt (%)</span><input type="range" id="bg_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="bg_opacity_val"></span></div><div id="solid_settings" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;"><div class="row"><span class="label">Màu nền</span><div class="input-group"><input type="color" id="bg_color" class="config-trigger"><span class="val-badge" id="bg_color_val"></span></div></div></div><div id="gradient_settings" style="display:none;"><div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;"><span class="label">Mẫu Gradient</span><select id="bg_gradient_preset" class="ha-select config-trigger"><option value="linear-gradient(135deg, #f0f4f8, #d9e2ec)">☀️ Sáng mặc định</option><option value="linear-gradient(135deg, #1e293b, #0f172a)">🌙 Tối mặc định</option><option value="linear-gradient(135deg, #141e30, #243b55)">🌌 Royal Night</option><option value="linear-gradient(135deg, #0f2027, #203a43, #2c5364)">🌊 Deep Ocean</option><option value="linear-gradient(135deg, #232526, #414345)">🏙️ Midnight City</option><option value="custom">✍️ Tùy chỉnh (Custom)</option></select></div><div id="custom_gradient_row" style="display:none; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--divider-color, #e0e0e0);"><div class="row" style="width:100%;"><span class="label">Màu 1</span><div class="input-group"><input type="color" id="bg_gradient_color1" class="config-trigger"><span class="val-badge" id="bg_gradient_color1_val"></span></div></div><div class="row" style="width:100%;"><span class="label">Màu 2</span><div class="input-group"><input type="color" id="bg_gradient_color2" class="config-trigger"><span class="val-badge" id="bg_gradient_color2_val"></span></div></div><div class="row" style="width:100%;"><span class="label">Góc độ (°)</span><input type="range" id="bg_gradient_angle" class="config-trigger" min="0" max="360" step="1"><span class="val-badge" id="bg_gradient_angle_val"></span></div></div></div></div></div>
           <div class="section collapsed"><div class="section-title"><div class="title-left">🖋️ Nội dung & Màu sắc</div><div class="title-right"><input type="checkbox" id="auto_contrast" class="config-trigger" title="Tự động tương phản"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="custom_colors_settings"><div class="row"><span class="label">Màu chữ</span><div class="input-group"><input type="color" id="textColor" class="config-trigger"><span class="val-badge" id="textColor_val"></span></div></div><div class="row"><span class="label">Màu Nhấn</span><div class="input-group"><input type="color" id="accentColor" class="config-trigger"><span class="val-badge" id="accentColor_val"></span></div></div><div class="row"><span class="label">Màu Tiền</span><div class="input-group"><input type="color" id="moneyColor" class="config-trigger"><span class="val-badge" id="moneyColor_val"></span></div></div><div class="row"><span class="label">Màu Nền khối</span><div class="input-group"><input type="color" id="blockBg" class="config-trigger"><span class="val-badge" id="blockBg_val"></span></div></div></div></div></div>
-          
           <div class="section collapsed"><div class="section-title"><div class="title-left">🔲 Viền (Border)</div><div class="title-right"><input type="checkbox" id="border_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="border_settings"><div class="row"><span class="label">Màu viền</span><div class="input-group"><input type="color" id="border_color" class="config-trigger"><span class="val-badge" id="border_color_val"></span></div></div><div class="row"><span class="label">Độ dày (px)</span><input type="range" id="border_width" class="config-trigger" min="0" max="10" step="1"><span class="val-badge" id="border_width_val"></span></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="border_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="border_opacity_val"></span></div></div></div></div>
-          
           <div class="section collapsed"><div class="section-title"><div class="title-left">☁️ Đổ bóng (Shadow)</div><div class="title-right"><input type="checkbox" id="shadow_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="shadow_settings"><div class="row"><span class="label">Màu bóng</span><div class="input-group"><input type="color" id="shadow_color" class="config-trigger"><span class="val-badge" id="shadow_color_val"></span></div></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="shadow_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_opacity_val"></span></div><div class="row"><span class="label">Độ nhòe</span><input type="range" id="shadow_blur" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_blur_val"></span></div><div class="row"><span class="label">Offset X</span><input type="range" id="shadow_offset_x" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_x_val"></span></div><div class="row"><span class="label">Offset Y</span><input type="range" id="shadow_offset_y" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_y_val"></span></div></div></div></div>
         </div>
       `;
@@ -172,15 +115,11 @@
 
     updateUI() {
       if (!this.querySelector('#bg_type')) return;
-      
       this.querySelector('#card_height').value = this._card_height;
       if(this.querySelector('#card_height_val')) this.querySelector('#card_height_val').textContent = this._card_height + 'px';
-
       this.querySelector('#bg_type').value = this._bg_type;
-      
       this.querySelector('#bg_opacity').value = this._bg_opacity;
       if(this.querySelector('#bg_opacity_val')) this.querySelector('#bg_opacity_val').textContent = this._bg_opacity + '%';
-      
       if (this._bg_type === 'gradient') {
         this.querySelector('#solid_settings').style.display = 'none';
         this.querySelector('#gradient_settings').style.display = 'block';
@@ -188,57 +127,41 @@
         this.querySelector('#solid_settings').style.display = 'block';
         this.querySelector('#gradient_settings').style.display = 'none';
       }
-      
       this.querySelector('#bg_color').value = this._bg_color;
       if(this.querySelector('#bg_color_val')) this.querySelector('#bg_color_val').textContent = this._bg_color.toUpperCase();
-
       this.querySelector('#bg_gradient_preset').value = this._bg_gradient_preset;
       if (this._bg_gradient_preset === 'custom') {
         this.querySelector('#custom_gradient_row').style.display = 'flex';
       } else {
         this.querySelector('#custom_gradient_row').style.display = 'none';
       }
-      
       this.querySelector('#bg_gradient_color1').value = this._bg_gradient_color1;
       if(this.querySelector('#bg_gradient_color1_val')) this.querySelector('#bg_gradient_color1_val').textContent = this._bg_gradient_color1.toUpperCase();
-      
       this.querySelector('#bg_gradient_color2').value = this._bg_gradient_color2;
       if(this.querySelector('#bg_gradient_color2_val')) this.querySelector('#bg_gradient_color2_val').textContent = this._bg_gradient_color2.toUpperCase();
-      
       this.querySelector('#bg_gradient_angle').value = this._bg_gradient_angle;
       if(this.querySelector('#bg_gradient_angle_val')) this.querySelector('#bg_gradient_angle_val').textContent = this._bg_gradient_angle + '°';
-
       const borderCheckbox = this.querySelector('#border_enable');
       if (borderCheckbox) borderCheckbox.checked = this._border_enable;
       this.querySelector('#border_settings').style.display = this._border_enable ? 'block' : 'none';
-      
       this.querySelector('#border_color').value = this._border_color;
       if(this.querySelector('#border_color_val')) this.querySelector('#border_color_val').textContent = this._border_color.toUpperCase();
-      
       this.querySelector('#border_width').value = this._border_width;
       if(this.querySelector('#border_width_val')) this.querySelector('#border_width_val').textContent = this._border_width + 'px';
-      
       this.querySelector('#border_opacity').value = this._border_opacity;
       if(this.querySelector('#border_opacity_val')) this.querySelector('#border_opacity_val').textContent = this._border_opacity + '%';
-
       this.querySelector('#shadow_enable').checked = this._shadow_enable;
       this.querySelector('#shadow_settings').style.display = this._shadow_enable ? 'block' : 'none';
-      
       this.querySelector('#shadow_color').value = this._shadow_color;
       if(this.querySelector('#shadow_color_val')) this.querySelector('#shadow_color_val').textContent = this._shadow_color.toUpperCase();
-      
       this.querySelector('#shadow_opacity').value = this._shadow_opacity;
       if(this.querySelector('#shadow_opacity_val')) this.querySelector('#shadow_opacity_val').textContent = this._shadow_opacity + '%';
-      
       this.querySelector('#shadow_blur').value = this._shadow_blur;
       if(this.querySelector('#shadow_blur_val')) this.querySelector('#shadow_blur_val').textContent = this._shadow_blur + 'px';
-      
       this.querySelector('#shadow_offset_x').value = this._shadow_offset_x;
       if(this.querySelector('#shadow_offset_x_val')) this.querySelector('#shadow_offset_x_val').textContent = this._shadow_offset_x + 'px';
-      
       this.querySelector('#shadow_offset_y').value = this._shadow_offset_y;
       if(this.querySelector('#shadow_offset_y_val')) this.querySelector('#shadow_offset_y_val').textContent = this._shadow_offset_y + 'px';
-
       this.querySelector('#auto_contrast').checked = this._auto_contrast;
       if (this._auto_contrast) {
           this.querySelector('#custom_colors_settings').style.opacity = '0.4';
@@ -247,16 +170,12 @@
           this.querySelector('#custom_colors_settings').style.opacity = '1';
           this.querySelector('#custom_colors_settings').style.pointerEvents = 'auto';
       }
-      
       this.querySelector('#textColor').value = this._textColor;
       if(this.querySelector('#textColor_val')) this.querySelector('#textColor_val').textContent = this._textColor.toUpperCase();
-      
       this.querySelector('#accentColor').value = this._accentColor;
       if(this.querySelector('#accentColor_val')) this.querySelector('#accentColor_val').textContent = this._accentColor.toUpperCase();
-      
       this.querySelector('#moneyColor').value = this._moneyColor;
       if(this.querySelector('#moneyColor_val')) this.querySelector('#moneyColor_val').textContent = this._moneyColor.toUpperCase();
-      
       this.querySelector('#blockBg').value = this._blockBg;
       if(this.querySelector('#blockBg_val')) this.querySelector('#blockBg_val').textContent = this._blockBg.toUpperCase();
     }
@@ -363,6 +282,7 @@
       
       this._expandedOrderId = null; 
       this._itemToDelete = null;
+      this._editingOrder = null;
 
       this._configEntriesMap = {};
       this._entityRegistryMap = {};
@@ -685,7 +605,7 @@
           .stat-line .val-qty { color: #fbbf24; }
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
-          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 60px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
           .table-wrapper { flex: 1; overflow: auto; } 
@@ -693,7 +613,7 @@
           .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
           .t-row-container:last-child { border-bottom: none; }
           
-          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 30px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
+          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(80px, 22vw, 110px) 60px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
           .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
 
           .t-row:hover { background: rgba(255, 255, 255, 0.08); }
@@ -714,9 +634,11 @@
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
-          .col-action { display: flex; align-items: center; justify-content: center; z-index: 2; }
-          .btn-delete { color: #ef4444; opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px; padding: 4px;}
-          .btn-delete:hover { opacity: 1; transform: scale(1.1);}
+          .col-action { display: flex; align-items: center; justify-content: center; z-index: 2; gap: 4px; }
+          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 20px; padding: 4px;}
+          .btn-delete { color: #ef4444; }
+          .btn-edit { color: var(--accent); }
+          .btn-delete:hover, .btn-edit:hover { opacity: 1; transform: scale(1.1);}
 
           .row-details { background: rgba(0,0,0,0.2); padding: 6px 10px; color: var(--text-main); border-top: 1px dashed var(--glass-border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
           .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
@@ -825,11 +747,16 @@
                 return;
             }
 
-            // Expand/Collapse Chi Tiết Đơn Hàng & Tính năng tự động đóng
+            const btnEdit = e.target.closest('.btn-edit');
+            if (btnEdit) {
+                e.stopPropagation();
+                this.startEdit(parseInt(btnEdit.dataset.id));
+                return;
+            }
+
             const tRow = e.target.closest('.t-row');
             const rowDetails = e.target.closest('.row-details');
 
-            // 1. Click ra ngoài bảng hoặc dòng dữ liệu -> Đóng toàn bộ các chi tiết đang mở
             if (!tRow && !rowDetails) {
                 this.card.querySelectorAll('.t-row.expanded').forEach(r => {
                     r.classList.remove('expanded');
@@ -839,13 +766,10 @@
                 this._expandedOrderId = null;
             }
 
-            // 2. Click vào 1 dòng cụ thể
             if (tRow) {
                 const isExpanded = tRow.classList.contains('expanded');
                 const details = tRow.nextElementSibling;
 
-                // Trước khi mở dòng mới, tự động ĐÓNG TẤT CẢ các dòng khác trên toàn bộ thẻ
-                // (Giúp đóng cả dòng bên bảng "Tra cứu" nếu click sang bảng "Bảo hành" và ngược lại)
                 this.card.querySelectorAll('.t-row.expanded').forEach(r => {
                     if (r !== tRow) {
                         r.classList.remove('expanded');
@@ -854,7 +778,6 @@
                     }
                 });
 
-                // Xử lý mở/đóng dòng hiện tại được click
                 if (!isExpanded) {
                     tRow.classList.add('expanded');
                     if (details && details.classList.contains('row-details')) details.style.display = 'block';
@@ -868,6 +791,20 @@
             }
 
             if (e.target.closest('#btn-empty-add')) { this.switchTab('add'); return; }
+
+            if (e.target.closest('#btn-cancel-edit')) {
+                this._editingOrder = null;
+                this.renderContent();
+                return;
+            }
+
+            if (e.target.closest('#btn-search-edit')) {
+                const idInput = this.card.querySelector('#search-edit-id').value;
+                const id = parseInt(idInput);
+                if (id) this.startEdit(id);
+                else alert("Vui lòng nhập ID hợp lệ.");
+                return;
+            }
 
             const navBtn = e.target.closest('.nav-btn:not(.disabled)');
             if (navBtn) {
@@ -951,6 +888,16 @@
         this.card.addEventListener('submit', (e) => {
             if (e.target.id === 'add-order-form') { e.preventDefault(); this.handleAddSubmit(e.target); }
         });
+    }
+
+    startEdit(orderId) {
+        const item = this._allProfileItems.find(i => i.id === orderId);
+        if (!item) {
+            alert("Không tìm thấy đơn hàng với ID này trong hồ sơ hiện tại!");
+            return;
+        }
+        this._editingOrder = item;
+        this.switchTab('add');
     }
 
     updateTheme() {
@@ -1130,11 +1077,12 @@
 
         this._els.tabs.innerHTML = `
            <div class="tab ${this._activeTab === 'history' ? 'active' : ''}" data-target="history">📋 Lịch sử</div>
-           <div class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm mới</div>
+           <div class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm / Sửa</div>
         `;
     }
 
     switchTab(tabName) {
+      if (tabName !== 'add') this._editingOrder = null;
       this._activeTab = tabName;
       this._expandedOrderId = null;
       this._historyPage = 1;
@@ -1332,11 +1280,43 @@
         const todayStr = new Date().toISOString().split('T')[0];
         
         const activeProfileName = (this._profilesData[this._currentProfileId] && this._profilesData[this._currentProfileId].name) ? this._profilesData[this._currentProfileId].name : 'Hồ sơ mặc định';
+        
+        const isEdit = !!this._editingOrder;
+        const titleText = isEdit ? `Sửa đơn hàng ID: ${this._editingOrder.id}` : `Nhập vào: ${activeProfileName}`;
+        const btnText = isEdit ? `Cập nhật Đơn Hàng` : `Lưu Đơn Hàng`;
+        const iconSave = isEdit ? `mdi:content-save-edit-outline` : `mdi:content-save-outline`;
+        const eOrder = this._editingOrder || {};
+
+        const v_name = eOrder.ten_hang || '';
+        const v_place = eOrder.noi_mua || '';
+        const v_cat = eOrder.nganh_hang || '';
+        const v_price = eOrder.don_gia || '';
+        const v_qty = eOrder.so_luong || 1;
+        const v_date = eOrder.ngay_mua || todayStr;
+        const v_status = eOrder.tinh_trang || 'Mới';
+        const v_model = eOrder.model || '';
+        const v_mfg = eOrder.hang_sx || '';
+        const v_vat = eOrder.vat_percent || 0;
+        const v_war = eOrder.thoi_gian_bh_thang || 0;
+        const v_note = eOrder.ghi_chu || '';
+
+        const showDetails = isEdit ? 'block' : 'none';
+        const detailIcon = isEdit ? 'mdi:chevron-up' : 'mdi:chevron-down';
+        const detailText = isEdit ? 'Ẩn thông tin chi tiết' : 'Nhập thông tin chi tiết (Model, BH, VAT, Ghi chú...)';
 
         return `
           <div class="add-tab-wrapper fade-in">
+          
+          <div class="search-id-box" style="display:flex; gap:8px; margin-bottom: 16px;">
+              <input type="number" id="search-edit-id" placeholder="Tìm ID đơn hàng để sửa nhanh..." style="flex:1; padding: 8px 12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--block-bg); color:var(--text-main); outline:none;">
+              <button type="button" id="btn-search-edit" class="btn-primary" style="padding: 8px 16px;"><ha-icon icon="mdi:magnify"></ha-icon> Tìm & Sửa</button>
+          </div>
+
           <form id="add-order-form">
-            <div class="form-title"><ha-icon icon="mdi:cart-plus"></ha-icon> Nhập vào: ${activeProfileName}</div>
+            <div class="form-title">
+              <ha-icon icon="${isEdit ? 'mdi:pencil-box-multiple-outline' : 'mdi:cart-plus'}"></ha-icon> 
+              ${titleText}
+            </div>
             
             <datalist id="cat-list">${catOptions}</datalist>
             <datalist id="place-list">${placeOptions}</datalist>
@@ -1345,84 +1325,87 @@
             <div class="form-row">
               <div class="f-group">
                 <label>Tên hàng hóa <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_name" required placeholder="VD: iPhone 15 Pro Max">
+                <input type="text" id="f_name" required value="${v_name}" placeholder="VD: iPhone 15 Pro Max">
               </div>
             </div>
 
             <div class="form-row split">
               <div class="f-group">
                 <label>Nơi mua <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_place" required list="place-list" placeholder="VD: Shopee">
+                <input type="text" id="f_place" required list="place-list" value="${v_place}" placeholder="VD: Shopee">
               </div>
               <div class="f-group">
                 <label>Ngành hàng <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_category" required list="cat-list" placeholder="VD: Công nghệ">
+                <input type="text" id="f_category" required list="cat-list" value="${v_cat}" placeholder="VD: Công nghệ">
               </div>
             </div>
 
             <div class="form-row split">
               <div class="f-group">
                 <label>Đơn giá (VNĐ) <span style="color:var(--money)">*</span></label>
-                <input type="number" id="f_price" required min="0" placeholder="0">
+                <input type="number" id="f_price" required min="0" value="${v_price}" placeholder="0">
               </div>
               <div class="f-group" style="flex: 0.5;">
                 <label>Số lượng <span style="color:var(--money)">*</span></label>
-                <input type="number" id="f_qty" required min="0.1" step="0.1" value="1">
+                <input type="number" id="f_qty" required min="0.1" step="0.1" value="${v_qty}">
               </div>
             </div>
 
             <div class="form-row split">
               <div class="f-group">
                 <label>Ngày mua</label>
-                <input type="date" id="f_date" value="${todayStr}">
+                <input type="date" id="f_date" value="${v_date}">
               </div>
               <div class="f-group">
                 <label>Tình trạng <span style="color:var(--money)">*</span></label>
                 <select id="f_status">
-                  <option value="Mới" selected>Mới</option>
-                  <option value="Cũ / Like New">Cũ / Like New</option>
-                  <option value="Hàng trưng bày">Hàng trưng bày</option>
-                  <option value="Hỏng / Xác">Hỏng / Xác</option>
+                  <option value="Mới" ${v_status === 'Mới' ? 'selected' : ''}>Mới</option>
+                  <option value="Cũ / Like New" ${v_status === 'Cũ / Like New' ? 'selected' : ''}>Cũ / Like New</option>
+                  <option value="Hàng trưng bày" ${v_status === 'Hàng trưng bày' ? 'selected' : ''}>Hàng trưng bày</option>
+                  <option value="Hỏng / Xác" ${v_status === 'Hỏng / Xác' ? 'selected' : ''}>Hỏng / Xác</option>
                 </select>
               </div>
             </div>
 
             <div class="form-details-toggle" id="toggle-details">
-              <span>Nhập thông tin chi tiết (Model, BH, VAT, Ghi chú...)</span> <ha-icon icon="mdi:chevron-down"></ha-icon>
+              <span>${detailText}</span> <ha-icon icon="${detailIcon}"></ha-icon>
             </div>
 
-            <div class="form-details-content" id="details-content" style="display:none;">
+            <div class="form-details-content" id="details-content" style="display:${showDetails};">
               <div class="form-row split">
                 <div class="f-group">
                   <label>Mã Model</label>
-                  <input type="text" id="f_model" placeholder="Mã sản phẩm">
+                  <input type="text" id="f_model" value="${v_model}" placeholder="Mã sản phẩm">
                 </div>
                 <div class="f-group">
                   <label>Hãng SX</label>
-                  <input type="text" id="f_manufacturer" list="mfg-list" placeholder="Thương hiệu">
+                  <input type="text" id="f_manufacturer" list="mfg-list" value="${v_mfg}" placeholder="Thương hiệu">
                 </div>
               </div>
               <div class="form-row split">
                 <div class="f-group">
                   <label>Thuế VAT (%)</label>
-                  <input type="number" id="f_vat" min="0" max="100" value="0">
+                  <input type="number" id="f_vat" min="0" max="100" value="${v_vat}">
                 </div>
                 <div class="f-group">
                   <label>Bảo hành (tháng)</label>
-                  <input type="number" id="f_warranty" min="0" value="0">
+                  <input type="number" id="f_warranty" min="0" value="${v_war}">
                 </div>
               </div>
               <div class="form-row">
                 <div class="f-group">
                   <label>Ghi chú</label>
-                  <textarea id="f_note" placeholder="Nhập ghi chú cho đơn hàng..." rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit; resize: vertical;"></textarea>
+                  <textarea id="f_note" placeholder="Nhập ghi chú cho đơn hàng..." rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit; resize: vertical;">${v_note}</textarea>
                 </div>
               </div>
             </div>
 
-            <button type="submit" class="btn-primary" style="width:100%; margin-top:16px; font-size: 16px; padding: 12px;">
-              <ha-icon icon="mdi:content-save-outline"></ha-icon> Lưu Đơn Hàng
-            </button>
+            <div style="display: flex; gap: 12px; margin-top: 16px;">
+                ${isEdit ? `<button type="button" class="btn-primary" id="btn-cancel-edit" style="background: rgba(255,255,255,0.1); color: var(--text-main); flex: 0.4;"><ha-icon icon="mdi:close"></ha-icon> Hủy</button>` : ''}
+                <button type="submit" class="btn-primary" style="flex: 1; font-size: 16px; padding: 12px;">
+                  <ha-icon icon="${iconSave}"></ha-icon> ${btnText}
+                </button>
+            </div>
           </form>
           </div>
         `;
@@ -1457,6 +1440,7 @@
                 </div>
                 ${!isSearchMode ? `
                 <div class="col-action">
+                  <ha-icon class="btn-edit" icon="mdi:pencil-outline" data-id="${item.id}" title="Sửa"></ha-icon>
                   <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
                 </div>` : ''}
               </div>
@@ -1468,7 +1452,7 @@
                     <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
                     <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.hang_sx || '--'}</span></div>
                     <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat || 0}%</span></div>
+                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat_percent || 0}%</span></div>
                     <div class="d-item" style="grid-column: 1 / -1; margin-top: 4px;"><span class="d-lbl">Ghi chú:</span> <span class="d-val" style="white-space: normal; line-height: 1.4;">${item.ghi_chu || '--'}</span></div>
                  </div>
               </div>
@@ -1554,12 +1538,19 @@
       const pDate = formEl.querySelector('#f_date').value;
       if (pDate) data.purchase_date = pDate;
 
+      const isEdit = !!this._editingOrder;
+      const serviceName = isEdit ? 'edit_order' : 'add_order';
+      if (isEdit) {
+          data.order_id = this._editingOrder.id;
+      }
+
       try {
-          await this._hass.callService('shopping_history', 'add_order', data);
+          await this._hass.callService('shopping_history', serviceName, data);
           formEl.reset();
+          this._editingOrder = null;
           this.switchTab('history');
       } catch(err) {
-          alert("Lỗi khi thêm: " + err.message);
+          alert("Lỗi khi lưu: " + err.message);
       }
     }
   }
