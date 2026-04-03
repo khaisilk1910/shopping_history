@@ -11,6 +11,12 @@
     return dateString;
   };
 
+  // Hỗ trợ xử lý ngày an toàn cho Safari/iOS WebView trên App
+  const safeDate = (dateString) => {
+    if (!dateString) return new Date(0);
+    return new Date(dateString.replace(/-/g, '/')); 
+  };
+
   const hexToRgba = (hex, opacity) => {
     let c;
     if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
@@ -290,7 +296,6 @@
       this._configEntriesMap = {};
       this._entityRegistryMap = {};
       
-      // Trạng thái Loading
       this._isScanning = false;
       this._isLoading = true;
       this._waitingForSensors = false;
@@ -309,7 +314,6 @@
     }
 
     set hass(hass) {
-      // GUARD CLAUSE: Tránh crash nếu Home Assistant đẩy dữ liệu trống (thường gặp lúc vừa restart)
       if (!hass || !hass.states) return; 
 
       const oldHass = this._hass;
@@ -333,17 +337,21 @@
         
         let shouldUpdate = false;
         
-        // Sử dụng toán tử Optional Chaining (?.) để không bị văng lỗi khi sensor chưa load kịp thuộc tính
+        // Fix lõi App Mobile: Dùng && thay vì Optional Chaining (?.)
         const relevantSensors = Object.keys(hass.states).filter(k => 
             k.startsWith('sensor.') && 
-            hass.states[k]?.attributes?.danh_sach_chi_tiet !== undefined && 
-            hass.states[k]?.attributes?.nam !== undefined
+            hass.states[k] && 
+            hass.states[k].attributes && 
+            hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+            hass.states[k].attributes.nam !== undefined
         );
         
         const oldRelevantSensors = (oldHass && oldHass.states) ? Object.keys(oldHass.states).filter(k => 
             k.startsWith('sensor.') && 
-            oldHass.states[k]?.attributes?.danh_sach_chi_tiet !== undefined && 
-            oldHass.states[k]?.attributes?.nam !== undefined
+            oldHass.states[k] && 
+            oldHass.states[k].attributes && 
+            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+            oldHass.states[k].attributes.nam !== undefined
         ) : [];
 
         if (relevantSensors.length !== oldRelevantSensors.length) {
@@ -391,17 +399,17 @@
           console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
       }
 
-      // Safe Check với Optional Chaining
+      // Sửa lỗi Optional Chaining
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
-        this._hass.states[eid]?.attributes?.danh_sach_chi_tiet !== undefined && 
-        this._hass.states[eid]?.attributes?.nam !== undefined
+        this._hass.states[eid] && 
+        this._hass.states[eid].attributes && 
+        this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+        this._hass.states[eid].attributes.nam !== undefined
       );
 
-      // Phân tích trạng thái chờ cảm biến do HA khởi động
       if (shoppingEntries.length > 0 && yearSensors.length === 0) {
           this._waitingForSensors = true;
-          // Thiết lập timeout 10s để tránh treo UI vĩnh viễn
           if (!this._loadingTimeout) {
               this._loadingTimeout = setTimeout(() => {
                   this._waitingForSensors = false;
@@ -534,16 +542,16 @@
 
       Object.values(currentProf.map).forEach(eid => {
           const state = this._hass.states[eid];
-          if (state?.attributes?.danh_sach_chi_tiet) {
+          if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
               this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
           }
       });
-      this._allProfileItems.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
+      this._allProfileItems.sort((a, b) => safeDate(b.ngay_mua) - safeDate(a.ngay_mua));
 
       const yearEid = currentProf.map[this._selectedYear];
       if (yearEid) {
           const yearState = this._hass.states[yearEid];
-          if (yearState?.attributes?.danh_sach_chi_tiet) {
+          if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
               const allItems = yearState.attributes.danh_sach_chi_tiet;
               const mSet = new Set();
               allItems.forEach(i => { if(i.thang) mSet.add(parseInt(i.thang)); });
@@ -564,7 +572,7 @@
           }
       }
 
-      this._items.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
+      this._items.sort((a, b) => safeDate(b.ngay_mua) - safeDate(a.ngay_mua));
       
       this.renderHeaderAndTabs();
       this.renderContent();
@@ -572,7 +580,7 @@
 
     getDaysUntilExpiry(endDateStr) {
       if (!endDateStr) return null;
-      const end = new Date(endDateStr);
+      const end = safeDate(endDateStr);
       if (isNaN(end.getTime())) return null;
       const now = new Date();
       now.setHours(0,0,0,0); end.setHours(0,0,0,0);
@@ -642,6 +650,7 @@
 
     injectStaticCSS() {
         const style = document.createElement('style');
+        // Đã thêm Fallback CSS cho hàm clamp() để App cũ cũng hiển thị được
         style.textContent = `
           ::-webkit-scrollbar { width: 6px; height: 6px; }
           ::-webkit-scrollbar-track { background: transparent; }
@@ -659,64 +668,64 @@
           @keyframes pulse-icon { 0% { transform: scale(0.85); opacity: 0.8; } 100% { transform: scale(1.1); opacity: 1; text-shadow: 0 0 10px var(--accent); } }
 
           /* MAIN UI STYLES */
-          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
+          .header { display: flex; align-items: center; gap: 12px; font-size: 20px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
 
           .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; width: 100%; box-sizing: border-box;}
           .profile-selector { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 8px; border: 1px solid var(--glass-border); margin: 0;}
           .profile-info-wrapper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; }
-          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
+          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: 14px; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
           .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
           .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px; flex-shrink: 0;}
           .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
           
-          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
+          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: 13px; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
           .search-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
           .search-tab-btn:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
           
           @media (max-width: 420px) { .st-text { display: none; } .search-tab-btn { padding: 0 10px; } }
 
           .tabs { display: flex; gap: 8px; margin-bottom: 12px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); flex-shrink: 0;}
-          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
+          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: 13px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
           .tabs .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
           .tabs .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
 
           .tab-content-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
-          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
-          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
-          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
+          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
+          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: 5px 10px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
+          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: 14px; font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
           .control-box select option { background-color: var(--option-bg); color: var(--text-main); }
           .nav-btn { color: var(--text-dim); cursor: pointer; transition: 0.2s; font-size: 24px; }
           .nav-btn:hover:not(.disabled) { color: var(--accent); transform: scale(1.1); }
           .nav-btn.disabled { opacity: 0.2; pointer-events: none; }
 
           .stats-container { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;}
-          .stat-line { display: flex; align-items: center; gap: 8px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
-          .stat-line strong { color: var(--money); font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
+          .stat-line { display: flex; align-items: center; gap: 8px; font-size: 13px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
+          .stat-line strong { color: var(--money); font-size: 15px; font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
           .stat-line .val-qty { color: #fbbf24; }
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
           
-          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
-          .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+          .t-header { flex-shrink: 0; display: grid; grid-template-columns: 60px 1fr 90px 36px; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: 10px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: 11px; font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          .t-header.search-header, .t-header.warranty-header { grid-template-columns: 65px 1fr 95px; grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
           .table-wrapper { flex: 1; overflow: auto; } 
 
           .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
           .t-row-container:last-child { border-bottom: none; }
           
-          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
-          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+          .t-row { display: grid; grid-template-columns: 60px 1fr 90px 36px; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: 8px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
+          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: 65px 1fr 95px; grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
 
           .t-row:hover { background: rgba(255, 255, 255, 0.08); }
           .t-row.expanded { background: rgba(0, 0, 0, 0.15); }
           
-          .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
-          .col-date .d-id { font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
+          .col-date { font-size: 12px; font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
+          .col-date .d-id { font-size: 9px; font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
           .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden; pointer-events: none;}
-          .info-name { font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          .info-sub { font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .info-name { font-size: 13px; font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .info-sub { font-size: 11px; font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
           
           .warranty-date.expired-warranty { opacity: 0.5; text-decoration: line-through; }
           .warranty-date.valid-warranty { color: var(--accent); font-weight: 600; }
@@ -724,8 +733,8 @@
           @keyframes pulse-danger { 0% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } 50% { color: #ef4444; text-shadow: 0 0 12px rgba(239, 68, 68, 0.8); } 100% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } }
 
           .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden; pointer-events: none;}
-          .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
-          .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
+          .price-val { font-size: 13px; font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
+          .price-qty { font-size: 10px; font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
           .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
           .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 10px; padding: 2px; line-height: 1; }
@@ -1037,8 +1046,12 @@
             this.card.style.boxShadow = `${offsetX}px ${offsetY}px ${blur}px ${hexToRgba(shadowColor, shadowOpacity)}`;
         } else { this.card.style.boxShadow = 'none'; }
         
-        this.card.style.backdropFilter = "blur(16px)";
-        this.card.style.webkitBackdropFilter = "blur(16px)";
+        // Bọc an toàn cho iOS cũ
+        try {
+            this.card.style.backdropFilter = "blur(16px)";
+            this.card.style.webkitBackdropFilter = "blur(16px)";
+        } catch (e) {}
+
         this.card.style.borderRadius = "var(--ha-card-border-radius, 16px)";
         this.card.style.padding = "clamp(12px, 3vw, 16px)";
         this.card.style.height = `${conf.card_height || 600}px`;
@@ -1231,8 +1244,8 @@
               <ha-icon class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
             </div>
           </div>
-          <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
-            <ha-icon icon="mdi:format-list-bulleted" style="font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
+          <div style="font-size: 16px; font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
+            <ha-icon icon="mdi:format-list-bulleted" style="font-size: 18px; font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
             Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear || '--'}` : `Tháng ${this._selectedMonth}/${this._selectedYear || '--'}`}
           </div>
           <div id="history-dynamic-area" class="fade-in" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
@@ -1264,11 +1277,11 @@
           </div>
           <div class="stats-container">
             <div class="stat-line">
-              <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
+              <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: 20px; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
               Tổng chi tiêu: <strong>${formatMoney(this._stats.total)} ₫</strong>
             </div>
             <div class="stat-line">
-              <ha-icon icon="mdi:package-variant-closed" style="color: #fbbf24; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
+              <ha-icon icon="mdi:package-variant-closed" style="color: #fbbf24; font-size: 20px; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
               Tổng số đơn: <strong class="val-qty">${this._stats.orders} 📦</strong> <span style="font-size: 0.9em; opacity: 0.7;">(${this._stats.items} SP)</span>
             </div>
           </div>
@@ -1648,8 +1661,13 @@
     }
   }
 
-  customElements.define('shopping-history-editor', ShoppingHistoryEditor);
-  customElements.define('shopping-history-card', ShoppingHistoryCard);
+  // Chống lỗi crash khi App load lại trang và Element đã được khai báo
+  if (!customElements.get('shopping-history-editor')) {
+    customElements.define('shopping-history-editor', ShoppingHistoryEditor);
+  }
+  if (!customElements.get('shopping-history-card')) {
+    customElements.define('shopping-history-card', ShoppingHistoryCard);
+  }
 
   window.customCards = window.customCards || [];
   window.customCards.push({
