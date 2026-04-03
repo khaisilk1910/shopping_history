@@ -93,6 +93,13 @@ add_order:
       required: false
       selector:
         date:
+    note:
+      name: "Ghi chú"
+      description: "Thông tin thêm về đơn hàng."
+      required: false
+      selector:
+        text:
+          multiline: true
 
 delete_order:
   name: "Xóa đơn hàng"
