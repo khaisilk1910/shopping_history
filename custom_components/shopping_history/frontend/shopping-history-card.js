@@ -641,7 +641,7 @@
           
           /* ---------- ICON NHỎ HƠN, XẾP DỌC CHUẨN XÁC GIỮ NGUYÊN CHIỀU CAO ROW ---------- */
           .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
-          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 16px; padding: 2px; line-height: 1; }
+          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 10px; padding: 2px; line-height: 1; }
           .btn-delete { color: #ef4444; }
           .btn-edit { color: var(--accent); }
           .btn-delete:hover, .btn-edit:hover { opacity: 1; transform: scale(1.1);}
