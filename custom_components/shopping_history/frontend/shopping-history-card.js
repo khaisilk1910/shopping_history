@@ -290,13 +290,9 @@
       this._itemToDelete = null;
       this._editingOrder = null;
 
-      this._configEntriesMap = {};
-      this._entityRegistryMap = {};
-      
-      // Các cờ kiểm soát quá trình load để không gây nghẽn máy chủ HA
-      this._initialConfigFetched = false;
-      this._isFetchingConfig = false;
-      this._skeletonBuilt = false;
+      // Áp dụng Cờ (Flags) giống thẻ electricity để Đọc dữ liệu thụ động
+      this._initialized = false;
+      this._loadStartTime = null;
     }
 
     setConfig(config) {
@@ -304,103 +300,65 @@
       this._config = config;
       this.renderInit();
       this.updateTheme();
-      this.renderHeaderAndTabs();
-      if (this._hass) this.updateDataFromSensors();
+      if (this._hass) {
+         this.scanForInstances();
+         this.processData();
+         this.updateView();
+      }
     }
 
     set hass(hass) {
-      if (!hass || !hass.states) return; 
-
       const oldHass = this._hass;
       this._hass = hass;
 
-      // 1. Quét thông tin hệ thống (WebSocket) CHỈ 1 LẦN DUY NHẤT khi thẻ vừa load
-      if (!this._initialConfigFetched && !this._isFetchingConfig) {
-          this._isFetchingConfig = true;
-          this.setLoading(true, "Đang khởi tạo kết nối lần đầu...");
-          
-          this.fetchInitialConfig().then(() => {
-              this._initialConfigFetched = true;
-              this._isFetchingConfig = false;
-              this.updateDataFromSensors();
-              this.setLoading(false);
-          }).catch(err => {
-              console.warn("Lỗi fetch config HA, tiếp tục dùng fallback:", err);
-              this._initialConfigFetched = true;
-              this._isFetchingConfig = false;
-              this.updateDataFromSensors();
-              this.setLoading(false);
-          });
-          return;
+      if (!this._initialized) {
+        this.scanForInstances();
+        this.processData();
+        this.updateView();
+        this._initialized = true;
+        return;
       }
 
-      // 2. Nếu đã quét xong cấu hình, chỉ cập nhật UI khi Sensor liên quan thực sự thay đổi
-      if (this._initialConfigFetched && !this._isFetchingConfig) {
-          let shouldUpdate = false;
-          
-          const relevantSensors = Object.keys(hass.states).filter(k => 
-              k.startsWith('sensor.') && 
-              hass.states[k] && 
-              hass.states[k].attributes && 
-              hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-              hass.states[k].attributes.nam !== undefined
-          );
+      if (!oldHass) return;
 
-          if (!oldHass) {
-              shouldUpdate = true;
-          } else {
-              for (let eid of relevantSensors) {
-                  if (oldHass.states[eid] !== hass.states[eid]) {
-                      shouldUpdate = true;
-                      break;
-                  }
+      const relevantSensors = Object.keys(hass.states).filter(k => 
+          k.startsWith('sensor.') && 
+          hass.states[k] && 
+          hass.states[k].attributes && 
+          hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+          hass.states[k].attributes.nam !== undefined
+      );
+
+      let shouldUpdate = false;
+      if (this._profileList.length === 0 && relevantSensors.length > 0) {
+          shouldUpdate = true; // Dữ liệu mới vừa được nạp vào
+      } else {
+          for (let eid of relevantSensors) {
+              if (!oldHass.states[eid] || oldHass.states[eid] !== hass.states[eid]) {
+                  shouldUpdate = true;
+                  break;
               }
           }
-          
-          if (shouldUpdate) {
-              this.updateDataFromSensors();
-          }
+      }
+
+      if (shouldUpdate) {
+          this.scanForInstances();
+          this.processData();
+          this.updateView();
       }
     }
 
-    // Hàm gọi WebSocket lấy Config, chỉ chạy 1 lần
-    async fetchInitialConfig() {
-      if (!this._hass) return;
-      try {
-          const entries = await this._hass.callWS({ type: 'config_entries/get' });
-          this._configEntriesMap = {};
-          const shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
-          shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
-
-          const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
-          this._entityRegistryMap = {};
-          entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
-      } catch (err) {
-          throw err;
-      }
-    }
-
-    // Hàm phân tích dữ liệu thụ động (Không gọi WebSocket)
-    updateDataFromSensors() {
+    // Đọc thụ động: HOÀN TOÀN BỎ API WebSocket gây nghẽn
+    scanForInstances() {
       if (!this._hass || !this._hass.states) return;
 
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
-        eid.startsWith('sensor.') && 
-        this._hass.states[eid] && 
-        this._hass.states[eid].attributes && 
-        this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
-        this._hass.states[eid].attributes.nam !== undefined
+          eid.startsWith('sensor.') && 
+          this._hass.states[eid] && 
+          this._hass.states[eid].attributes && 
+          this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+          this._hass.states[eid].attributes.nam !== undefined
       );
-
-      // Nếu không có sensor nào, vẫn hiển thị thẻ nhưng báo trống
-      if (yearSensors.length === 0) {
-          this.setLoading(false);
-          this._items = [];
-          this._allProfileItems = [];
-          this.renderHeaderAndTabs();
-          this.renderContent();
-          return;
-      }
 
       this._uniqueCategories.clear();
       this._uniquePlaces.clear();
@@ -409,39 +367,37 @@
       const tempGroups = {};
 
       yearSensors.forEach(eid => {
-        const state = this._hass.states[eid];
-        if (!state || !state.attributes) return;
+          const state = this._hass.states[eid];
+          if (!state || !state.attributes) return;
 
-        const y = parseInt(state.attributes.nam);
-        
-        if (state.attributes.danh_sach_chi_tiet) {
-            state.attributes.danh_sach_chi_tiet.forEach(item => {
-                if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
-                if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
-                if (item.hang_sx) this._uniqueManufacturers.add(item.hang_sx.trim());
-            });
-        }
-        
-        if (!isNaN(y)) {
-            let groupId = this._entityRegistryMap[eid] || 
-                          (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
-                          state.attributes.config_entry_id;
+          const y = parseInt(state.attributes.nam);
+          
+          if (state.attributes.danh_sach_chi_tiet) {
+              state.attributes.danh_sach_chi_tiet.forEach(item => {
+                  if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
+                  if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
+                  if (item.hang_sx) this._uniqueManufacturers.add(item.hang_sx.trim());
+              });
+          }
+          
+          if (!isNaN(y)) {
+              // Tự động phân loại dựa trên thông tin sẵn có thay vì gửi WS
+              let groupId = (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) || state.attributes.config_entry_id;
 
-            if (!groupId) {
-                let baseName = state.attributes.friendly_name || eid;
-                groupId = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-            }
+              let baseName = state.attributes.friendly_name || eid;
+              baseName = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
 
-            if (!tempGroups[groupId]) { 
-                tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
-            }
-            tempGroups[groupId].years.add(y);
-            tempGroups[groupId].map[y] = eid;
-            
-            let pName = state.attributes.friendly_name || eid;
-            pName = pName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-            tempGroups[groupId].displayNames.push(pName);
-        }
+              if (!groupId) {
+                  groupId = baseName;
+              }
+
+              if (!tempGroups[groupId]) { 
+                  tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
+              }
+              tempGroups[groupId].years.add(y);
+              tempGroups[groupId].map[y] = eid;
+              tempGroups[groupId].displayNames.push(baseName);
+          }
       });
 
       this._profilesData = {};
@@ -449,24 +405,21 @@
 
       Object.keys(tempGroups).forEach(gId => {
           const group = tempGroups[gId];
-          let finalName = this._configEntriesMap[gId];
           
-          if (!finalName) {
-              if (group.displayNames.length > 0) {
-                  const nameCounts = group.displayNames.reduce((acc, name) => {
-                      acc[name] = (acc[name] || 0) + 1;
-                      return acc;
-                  }, {});
-                  finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
-              }
+          let finalName = gId;
+          if (group.displayNames.length > 0) {
+              const nameCounts = group.displayNames.reduce((acc, name) => {
+                  acc[name] = (acc[name] || 0) + 1;
+                  return acc;
+              }, {});
+              finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
           }
-          if (!finalName) finalName = gId; 
 
           let counter = 1;
           let uniqueName = finalName;
           while (this._profileList.some(p => p.name === uniqueName)) {
-             uniqueName = `${finalName} (${counter})`;
-             counter++;
+              uniqueName = `${finalName} (${counter})`;
+              counter++;
           }
 
           this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map };
@@ -493,19 +446,17 @@
       } else {
           this._availableYears = [];
       }
-
-      this.processDisplayData();
     }
 
-    processDisplayData() {
+    processData() {
+      if (!this._hass) return;
+
       this._items = [];
       this._allProfileItems = [];
       this._stats = { orders: 0, items: 0, total: 0 };
       this._availableMonths = [];
       
       if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) { 
-          this.renderHeaderAndTabs();
-          this.renderContent();
           return; 
       }
       
@@ -544,9 +495,6 @@
       }
 
       this._items.sort((a, b) => safeDate(b.ngay_mua) - safeDate(a.ngay_mua));
-      
-      this.renderHeaderAndTabs();
-      this.renderContent();
     }
 
     getDaysUntilExpiry(endDateStr) {
@@ -572,27 +520,14 @@
         this.shadowRoot.appendChild(this.card);
         
         this.card.innerHTML = `
-          <div id="c-loading" class="loading-container fade-in">
-              <div class="fancy-loader">
-                  <ha-icon class="l-icon" icon="mdi:cart-arrow-up"></ha-icon>
-                  <div class="l-ring"></div>
-              </div>
-              <div class="loading-text">Đang tải dữ liệu...</div>
-              <div class="loading-subtext" id="c-loading-subtext">Khởi tạo kết nối hệ thống</div>
-          </div>
-          <div id="c-main" style="display:none; flex-direction:column; height:100%; flex:1;">
-              <div id="c-header" class="header"></div>
-              <div id="c-topbar" class="top-bar"></div>
-              <div id="c-tabs" class="tabs"></div>
-              <div id="c-content" class="tab-content-area"></div>
-          </div>
+          <div id="c-header" class="header"></div>
+          <div id="c-topbar" class="top-bar"></div>
+          <div id="c-tabs" class="tabs"></div>
+          <div id="c-content" class="tab-content-area"></div>
           <div id="c-modal"></div>
         `;
         
         this._els = {
-            loading: this.card.querySelector('#c-loading'),
-            loadingSubtext: this.card.querySelector('#c-loading-subtext'),
-            main: this.card.querySelector('#c-main'),
             header: this.card.querySelector('#c-header'),
             topbar: this.card.querySelector('#c-topbar'),
             tabs: this.card.querySelector('#c-tabs'),
@@ -602,20 +537,7 @@
         
         this.attachGlobalListeners();
         this.injectStaticCSS();
-        this._skeletonBuilt = true;
       }
-    }
-
-    setLoading(state, message = "Đang tải thông tin từ Home Assistant...") {
-        if (!this._els) return;
-        if (state) {
-            this._els.loading.style.display = 'flex';
-            this._els.main.style.display = 'none';
-            if (this._els.loadingSubtext) this._els.loadingSubtext.textContent = message;
-        } else {
-            this._els.loading.style.display = 'none';
-            this._els.main.style.display = 'flex';
-        }
     }
 
     injectStaticCSS() {
@@ -626,75 +548,64 @@
           ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
           ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-          /* LOADER STYLES */
-          .loading-container { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; text-align: center; }
-          .fancy-loader { position: relative; width: 70px; height: 70px; margin-bottom: 24px; display: flex; align-items: center; justify-content: center; }
-          .fancy-loader .l-ring { position: absolute; top: 0; left: 0; right: 0; bottom: 0; border: 4px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
-          .fancy-loader .l-icon { font-size: 32px; color: var(--accent); animation: pulse-icon 1.5s infinite alternate; }
-          .loading-text { font-size: 18px; font-weight: 800; color: var(--text-main); margin-bottom: 8px; letter-spacing: 0.5px; }
-          .loading-subtext { font-size: 13px; color: var(--text-dim); max-width: 80%; line-height: 1.4; }
-          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-          @keyframes pulse-icon { 0% { transform: scale(0.85); opacity: 0.8; } 100% { transform: scale(1.1); opacity: 1; text-shadow: 0 0 10px var(--accent); } }
-
-          /* MAIN UI STYLES */
-          .header { display: flex; align-items: center; gap: 12px; font-size: 20px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
+          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
 
           .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; width: 100%; box-sizing: border-box;}
           .profile-selector { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 8px; border: 1px solid var(--glass-border); margin: 0;}
           .profile-info-wrapper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; }
-          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: 14px; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
+          .profile-selector select { background: transparent; border: none; color: var(--accent); font-weight: 500; font-size: clamp(13px, 3.5vw, 16px); text-align: center; flex: 1; min-width: 0; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;}
           .profile-selector select option { background: var(--option-bg); color: var(--text-main); }
           .profile-nav { color: var(--text-main); cursor: pointer; padding: 4px; transition: 0.2s; font-size: 24px; flex-shrink: 0;}
           .profile-nav:hover { color: var(--accent); transform: scale(1.1); }
           
-          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: 13px; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
+          .search-tab-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.1); color: var(--text-dim); font-weight: 600; cursor: pointer; transition: 0.2s; user-select: none; font-size: clamp(12px, 3.5vw, 14px); white-space: nowrap;}
           .search-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
           .search-tab-btn:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
           
           @media (max-width: 420px) { .st-text { display: none; } .search-tab-btn { padding: 0 10px; } }
 
           .tabs { display: flex; gap: 8px; margin-bottom: 12px; background: rgba(0,0,0,0.1); padding: 4px; border-radius: 12px; border: 1px solid var(--glass-border); flex-shrink: 0;}
-          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: 13px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
+          .tabs .tab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; font-size: clamp(12px, 3.5vw, 14px); font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; user-select: none; }
           .tabs .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
           .tabs .tab:hover:not(.active) { background: var(--block-bg); color: var(--text-main); }
 
           .tab-content-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
-          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
-          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: 5px 10px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
-          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: 14px; font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
+          .controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 12px); margin-bottom: 12px; flex-shrink: 0;}
+          .control-box { background: var(--block-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: clamp(4px, 1.5vw, 6px) clamp(8px, 2vw, 12px); display: flex; align-items: center; justify-content: space-between; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
+          .control-box select { background: transparent; border: none; color: var(--text-main); font-size: clamp(14px, 3.5vw, 16px); font-weight: 700; flex: 1; text-align: center; text-align-last: center; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; padding: 4px 0; }
           .control-box select option { background-color: var(--option-bg); color: var(--text-main); }
           .nav-btn { color: var(--text-dim); cursor: pointer; transition: 0.2s; font-size: 24px; }
           .nav-btn:hover:not(.disabled) { color: var(--accent); transform: scale(1.1); }
           .nav-btn.disabled { opacity: 0.2; pointer-events: none; }
 
           .stats-container { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--glass-border); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;}
-          .stat-line { display: flex; align-items: center; gap: 8px; font-size: 13px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
-          .stat-line strong { color: var(--money); font-size: 15px; font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
+          .stat-line { display: flex; align-items: center; gap: 8px; font-size: clamp(12px, 3.5vw, 14px); color: var(--text-dim); font-weight: 500; }
+          .stat-line strong { color: var(--money); font-size: clamp(14px, 4vw, 16px); font-weight: 800; }
           .stat-line .val-qty { color: #fbbf24; }
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
           
-          .t-header { flex-shrink: 0; display: grid; grid-template-columns: 60px 1fr 90px 36px; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: 10px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: 11px; font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
-          .t-header.search-header, .t-header.warranty-header { grid-template-columns: 65px 1fr 95px; grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
           .table-wrapper { flex: 1; overflow: auto; } 
 
           .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
           .t-row-container:last-child { border-bottom: none; }
           
-          .t-row { display: grid; grid-template-columns: 60px 1fr 90px 36px; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: 8px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
-          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: 65px 1fr 95px; grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
+          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
+          .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
 
           .t-row:hover { background: rgba(255, 255, 255, 0.08); }
           .t-row.expanded { background: rgba(0, 0, 0, 0.15); }
           
-          .col-date { font-size: 12px; font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
-          .col-date .d-id { font-size: 9px; font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
+          .col-date { font-size: clamp(11px, 3vw, 13px); font-weight: 600; color: var(--text-dim); pointer-events: none;}
+          .col-date .d-id { font-size: clamp(9px, 2vw, 10px); opacity: 0.5; margin-top: 2px; }
           .col-info { display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overflow: hidden; pointer-events: none;}
-          .info-name { font-size: 13px; font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-          .info-sub { font-size: 11px; font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .info-name { font-size: clamp(12px, 3.5vw, 15px); font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+          .info-sub { font-size: clamp(10px, 2.5vw, 12px); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
           
           .warranty-date.expired-warranty { opacity: 0.5; text-decoration: line-through; }
           .warranty-date.valid-warranty { color: var(--accent); font-weight: 600; }
@@ -702,11 +613,11 @@
           @keyframes pulse-danger { 0% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } 50% { color: #ef4444; text-shadow: 0 0 12px rgba(239, 68, 68, 0.8); } 100% { color: #facc15; text-shadow: 0 0 5px rgba(250, 204, 21, 0.4); } }
 
           .col-price { text-align: right; display: flex; flex-direction: column; justify-content: center; overflow: hidden; pointer-events: none;}
-          .price-val { font-size: 13px; font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
-          .price-qty { font-size: 10px; font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
+          .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
+          .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
           .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
-          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 8px; padding: 2px; line-height: 1; }
+          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 10px; padding: 2px; line-height: 1; }
           .btn-delete { color: #ef4444; }
           .btn-edit { color: var(--accent); }
           .btn-delete:hover, .btn-edit:hover { opacity: 1; transform: scale(1.1);}
@@ -865,7 +776,7 @@
 
             if (e.target.closest('#btn-cancel-edit')) {
                 this._editingOrder = null;
-                this.renderContent();
+                this.updateView();
                 return;
             }
 
@@ -879,18 +790,18 @@
 
             const navBtn = e.target.closest('.nav-btn:not(.disabled)');
             if (navBtn) {
-                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.processDisplayData(); }
-                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.processDisplayData(); }
-                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.processDisplayData(); }
-                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.processDisplayData(); }
+                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.processData(); this.updateView(); }
+                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.processData(); this.updateView(); }
+                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.processData(); this.updateView(); }
+                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.processData(); this.updateView(); }
                 return;
             }
 
             const pNav = e.target.closest('.profile-nav');
             if (pNav) {
                 let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
-                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.processDisplayData(); }
-                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.processDisplayData(); }
+                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.processData(); this.updateView(); }
+                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.processData(); this.updateView(); }
                 return;
             }
 
@@ -913,9 +824,9 @@
         });
 
         this.card.addEventListener('change', (e) => {
-            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.processDisplayData(); }
-            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.processDisplayData(); }
-            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.processDisplayData(); }
+            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.processData(); this.updateView(); }
+            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.processData(); this.updateView(); }
+            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.processData(); this.updateView(); }
             else if (e.target.id === 'warranty-slider') {
                 this._warrantyDays = parseInt(e.target.value);
                 this._warrantyPage = 1;
@@ -1015,11 +926,8 @@
             this.card.style.boxShadow = `${offsetX}px ${offsetY}px ${blur}px ${hexToRgba(shadowColor, shadowOpacity)}`;
         } else { this.card.style.boxShadow = 'none'; }
         
-        try {
-            this.card.style.backdropFilter = "blur(16px)";
-            this.card.style.webkitBackdropFilter = "blur(16px)";
-        } catch (e) {}
-
+        this.card.style.backdropFilter = "blur(16px)";
+        this.card.style.webkitBackdropFilter = "blur(16px)";
         this.card.style.borderRadius = "var(--ha-card-border-radius, 16px)";
         this.card.style.padding = "clamp(12px, 3vw, 16px)";
         this.card.style.height = `${conf.card_height || 600}px`;
@@ -1162,12 +1070,54 @@
       this._historyPage = 1;
       this._searchPage = 1;
       this._warrantyPage = 1;
-      this.renderHeaderAndTabs();
-      this.renderContent();
+      this.updateView();
     }
 
-    renderContent() {
+    updateView() {
       if(!this._els) return;
+
+      // Xử lý Loader thụ động (Passive Loader)
+      if (this._profileList.length === 0) {
+          if (!this._loadStartTime) this._loadStartTime = Date.now();
+          
+          if (Date.now() - this._loadStartTime > 20000) {
+              this._els.content.innerHTML = `
+                  <div style="padding: 24px 16px; text-align: center; border-radius: 12px; background: rgba(220, 38, 38, 0.1); border: 1px dashed rgba(220, 38, 38, 0.3); margin-top: 12px;">
+                      <ha-icon icon="mdi:alert-circle-outline" style="color: #dc2626; font-size: 32px; margin-bottom: 8px;"></ha-icon>
+                      <div style="color: #dc2626; font-weight: bold; font-size: 14px;">Chưa tìm thấy dữ liệu mua sắm.</div>
+                      <div style="color: #ef4444; font-size: 12px; margin-top: 4px;">Vui lòng kiểm tra lại Tích hợp trong Home Assistant.</div>
+                  </div>`;
+              this._els.topbar.style.display = 'none';
+              this._els.tabs.style.display = 'none';
+          } else {
+              this._els.content.innerHTML = `
+                  <style>
+                      .ha-card-loader { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; gap: 16px; min-height: 150px; }
+                      .loader-spinner { width: 36px; height: 36px; border: 3px solid var(--divider-color, rgba(120, 120, 120, 0.2)); border-top-color: var(--accent); border-radius: 50%; animation: ha-spin 1s linear infinite; }
+                      .loader-text { text-align: center; font-family: sans-serif; font-size: 14px; font-weight: 600; color: var(--text-dim); animation: ha-pulse 1.5s ease-in-out infinite; }
+                      @keyframes ha-spin { to { transform: rotate(360deg); } }
+                      @keyframes ha-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+                  </style>
+                  <div class="ha-card-loader">
+                      <div class="loader-spinner"></div>
+                      <div class="loader-text">Đang đồng bộ dữ liệu Mua sắm...
+                      <br>Vui lòng chờ dữ liệu đang được nạp
+                      </div>
+                  </div>
+              `;
+              this._els.topbar.style.display = 'none';
+              this._els.tabs.style.display = 'none';
+              setTimeout(() => { if (this._profileList.length === 0) this.updateView(); }, 1000);
+          }
+          return;
+      } else {
+          this._loadStartTime = null; 
+          this._els.topbar.style.display = 'flex';
+          this._els.tabs.style.display = 'flex';
+      }
+
+      this.renderHeaderAndTabs();
+
       if (this._activeTab === 'history') {
           this._els.content.innerHTML = this.getHistoryHTML();
       } else if (this._activeTab === 'search') {
@@ -1212,8 +1162,8 @@
               <ha-icon class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
             </div>
           </div>
-          <div style="font-size: 16px; font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
-            <ha-icon icon="mdi:format-list-bulleted" style="font-size: 18px; font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
+          <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
+            <ha-icon icon="mdi:format-list-bulleted" style="font-size: clamp(16px, 4vw, 18px); color: var(--accent);"></ha-icon> 
             Chi tiết ${this._selectedMonth === 'all' ? `Năm ${this._selectedYear || '--'}` : `Tháng ${this._selectedMonth}/${this._selectedYear || '--'}`}
           </div>
           <div id="history-dynamic-area" class="fade-in" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
@@ -1245,11 +1195,11 @@
           </div>
           <div class="stats-container">
             <div class="stat-line">
-              <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: 20px; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
+              <ha-icon icon="mdi:cash-multiple" style="color: var(--money); font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
               Tổng chi tiêu: <strong>${formatMoney(this._stats.total)} ₫</strong>
             </div>
             <div class="stat-line">
-              <ha-icon icon="mdi:package-variant-closed" style="color: #fbbf24; font-size: 20px; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
+              <ha-icon icon="mdi:package-variant-closed" style="color: #fbbf24; font-size: clamp(16px, 4.5vw, 20px);"></ha-icon> 
               Tổng số đơn: <strong class="val-qty">${this._stats.orders} 📦</strong> <span style="font-size: 0.9em; opacity: 0.7;">(${this._stats.items} SP)</span>
             </div>
           </div>
@@ -1622,7 +1572,7 @@
           await this._hass.callService('shopping_history', serviceName, data);
           formEl.reset();
           this._editingOrder = null;
-          this.switchTab('history');
+          this.updateView();
       } catch(err) {
           alert("Lỗi khi lưu: " + err.message);
       }
