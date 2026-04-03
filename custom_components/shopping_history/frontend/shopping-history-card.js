@@ -11,7 +11,6 @@
     return dateString;
   };
 
-  // Hỗ trợ xử lý ngày an toàn cho Safari/iOS WebView trên App
   const safeDate = (dateString) => {
     if (!dateString) return new Date(0);
     return new Date(dateString.replace(/-/g, '/')); 
@@ -283,8 +282,6 @@
       this._searchPage = 1;
       this._warrantyPage = 1;
 
-      this._entryIds = {}; 
-      
       this._uniqueCategories = new Set();
       this._uniquePlaces = new Set();
       this._uniqueManufacturers = new Set();
@@ -296,11 +293,9 @@
       this._configEntriesMap = {};
       this._entityRegistryMap = {};
       
-      this._isScanning = false;
-      this._isLoading = true;
-      this._waitingForSensors = false;
-      this._loadingTimeout = null;
-      
+      // Các cờ kiểm soát quá trình load để không gây nghẽn máy chủ HA
+      this._initialConfigFetched = false;
+      this._isFetchingConfig = false;
       this._skeletonBuilt = false;
     }
 
@@ -310,7 +305,7 @@
       this.renderInit();
       this.updateTheme();
       this.renderHeaderAndTabs();
-      if (this._hass) this.updateData();
+      if (this._hass) this.updateDataFromSensors();
     }
 
     set hass(hass) {
@@ -318,88 +313,77 @@
 
       const oldHass = this._hass;
       this._hass = hass;
-      
-      if (!oldHass) {
-        if (!this._isScanning) {
-            this._isScanning = true;
-            this.setLoading(true, "Đang khởi tạo kết nối...");
-            this.performFullScan().finally(() => { 
-                this._isScanning = false; 
-                if (!this._waitingForSensors) {
-                    this.setLoading(false);
-                } else {
-                    this.setLoading(true, "Đang đồng bộ dữ liệu từ Home Assistant (Có thể do vừa khởi động lại)...");
-                }
-            });
-        }
-      } else {
-        if (this._isScanning) return; 
-        
-        let shouldUpdate = false;
-        
-        // Fix lõi App Mobile: Dùng && thay vì Optional Chaining (?.)
-        const relevantSensors = Object.keys(hass.states).filter(k => 
-            k.startsWith('sensor.') && 
-            hass.states[k] && 
-            hass.states[k].attributes && 
-            hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-            hass.states[k].attributes.nam !== undefined
-        );
-        
-        const oldRelevantSensors = (oldHass && oldHass.states) ? Object.keys(oldHass.states).filter(k => 
-            k.startsWith('sensor.') && 
-            oldHass.states[k] && 
-            oldHass.states[k].attributes && 
-            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-            oldHass.states[k].attributes.nam !== undefined
-        ) : [];
 
-        if (relevantSensors.length !== oldRelevantSensors.length) {
-            shouldUpdate = true;
-        } else if (this._waitingForSensors && relevantSensors.length > 0) {
-            shouldUpdate = true;
-        } else {
-            for (let eid of relevantSensors) {
-                if (oldHass.states[eid] !== hass.states[eid]) {
-                    shouldUpdate = true;
-                    break;
-                }
-            }
-        }
-        
-        if (shouldUpdate) {
-            this._isScanning = true;
-            if (this._waitingForSensors) {
-                this.setLoading(true, "Đã tải xong cấu hình, đang xử lý dữ liệu...");
-            }
-            this.performFullScan().finally(() => { 
-                this._isScanning = false; 
-                if (!this._waitingForSensors) {
-                    this.setLoading(false);
-                }
-            });
-        }
+      // 1. Quét thông tin hệ thống (WebSocket) CHỈ 1 LẦN DUY NHẤT khi thẻ vừa load
+      if (!this._initialConfigFetched && !this._isFetchingConfig) {
+          this._isFetchingConfig = true;
+          this.setLoading(true, "Đang khởi tạo kết nối lần đầu...");
+          
+          this.fetchInitialConfig().then(() => {
+              this._initialConfigFetched = true;
+              this._isFetchingConfig = false;
+              this.updateDataFromSensors();
+              this.setLoading(false);
+          }).catch(err => {
+              console.warn("Lỗi fetch config HA, tiếp tục dùng fallback:", err);
+              this._initialConfigFetched = true;
+              this._isFetchingConfig = false;
+              this.updateDataFromSensors();
+              this.setLoading(false);
+          });
+          return;
+      }
+
+      // 2. Nếu đã quét xong cấu hình, chỉ cập nhật UI khi Sensor liên quan thực sự thay đổi
+      if (this._initialConfigFetched && !this._isFetchingConfig) {
+          let shouldUpdate = false;
+          
+          const relevantSensors = Object.keys(hass.states).filter(k => 
+              k.startsWith('sensor.') && 
+              hass.states[k] && 
+              hass.states[k].attributes && 
+              hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+              hass.states[k].attributes.nam !== undefined
+          );
+
+          if (!oldHass) {
+              shouldUpdate = true;
+          } else {
+              for (let eid of relevantSensors) {
+                  if (oldHass.states[eid] !== hass.states[eid]) {
+                      shouldUpdate = true;
+                      break;
+                  }
+              }
+          }
+          
+          if (shouldUpdate) {
+              this.updateDataFromSensors();
+          }
       }
     }
 
-    async performFullScan() {
-      if (!this._hass || !this._hass.states) return;
-
-      let shoppingEntries = [];
+    // Hàm gọi WebSocket lấy Config, chỉ chạy 1 lần
+    async fetchInitialConfig() {
+      if (!this._hass) return;
       try {
           const entries = await this._hass.callWS({ type: 'config_entries/get' });
           this._configEntriesMap = {};
-          shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
+          const shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
           shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
 
           const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
           this._entityRegistryMap = {};
           entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
       } catch (err) {
-          console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
+          throw err;
       }
+    }
 
-      // Sửa lỗi Optional Chaining
+    // Hàm phân tích dữ liệu thụ động (Không gọi WebSocket)
+    updateDataFromSensors() {
+      if (!this._hass || !this._hass.states) return;
+
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
         this._hass.states[eid] && 
@@ -408,21 +392,14 @@
         this._hass.states[eid].attributes.nam !== undefined
       );
 
-      if (shoppingEntries.length > 0 && yearSensors.length === 0) {
-          this._waitingForSensors = true;
-          if (!this._loadingTimeout) {
-              this._loadingTimeout = setTimeout(() => {
-                  this._waitingForSensors = false;
-                  this.setLoading(false);
-                  this._loadingTimeout = null;
-              }, 10000); 
-          }
-      } else {
-          this._waitingForSensors = false;
-          if (this._loadingTimeout) {
-              clearTimeout(this._loadingTimeout);
-              this._loadingTimeout = null;
-          }
+      // Nếu không có sensor nào, vẫn hiển thị thẻ nhưng báo trống
+      if (yearSensors.length === 0) {
+          this.setLoading(false);
+          this._items = [];
+          this._allProfileItems = [];
+          this.renderHeaderAndTabs();
+          this.renderContent();
+          return;
       }
 
       this._uniqueCategories.clear();
@@ -430,10 +407,6 @@
       this._uniqueManufacturers.clear();
 
       const tempGroups = {};
-
-      shoppingEntries.forEach(e => {
-          tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
-      });
 
       yearSensors.forEach(eid => {
         const state = this._hass.states[eid];
@@ -521,12 +494,10 @@
           this._availableYears = [];
       }
 
-      this.updateData();
+      this.processDisplayData();
     }
 
-    updateData() {
-      if (!this._hass || !this._hass.states) return;
-
+    processDisplayData() {
       this._items = [];
       this._allProfileItems = [];
       this._stats = { orders: 0, items: 0, total: 0 };
@@ -636,7 +607,6 @@
     }
 
     setLoading(state, message = "Đang tải thông tin từ Home Assistant...") {
-        this._isLoading = state;
         if (!this._els) return;
         if (state) {
             this._els.loading.style.display = 'flex';
@@ -650,7 +620,6 @@
 
     injectStaticCSS() {
         const style = document.createElement('style');
-        // Đã thêm Fallback CSS cho hàm clamp() để App cũ cũng hiển thị được
         style.textContent = `
           ::-webkit-scrollbar { width: 6px; height: 6px; }
           ::-webkit-scrollbar-track { background: transparent; }
@@ -910,18 +879,18 @@
 
             const navBtn = e.target.closest('.nav-btn:not(.disabled)');
             if (navBtn) {
-                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.updateData(); }
-                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.updateData(); }
-                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.updateData(); }
-                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.updateData(); }
+                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.processDisplayData(); }
+                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.processDisplayData(); }
+                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.processDisplayData(); }
+                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.processDisplayData(); }
                 return;
             }
 
             const pNav = e.target.closest('.profile-nav');
             if (pNav) {
                 let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
-                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.updateData(); }
-                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.updateData(); }
+                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.processDisplayData(); }
+                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.processDisplayData(); }
                 return;
             }
 
@@ -944,9 +913,9 @@
         });
 
         this.card.addEventListener('change', (e) => {
-            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.updateData(); }
-            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.updateData(); }
-            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.updateData(); }
+            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.processDisplayData(); }
+            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.processDisplayData(); }
+            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.processDisplayData(); }
             else if (e.target.id === 'warranty-slider') {
                 this._warrantyDays = parseInt(e.target.value);
                 this._warrantyPage = 1;
@@ -1046,7 +1015,6 @@
             this.card.style.boxShadow = `${offsetX}px ${offsetY}px ${blur}px ${hexToRgba(shadowColor, shadowOpacity)}`;
         } else { this.card.style.boxShadow = 'none'; }
         
-        // Bọc an toàn cho iOS cũ
         try {
             this.card.style.backdropFilter = "blur(16px)";
             this.card.style.webkitBackdropFilter = "blur(16px)";
