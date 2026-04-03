@@ -235,7 +235,7 @@
   // ==========================================
   class ShoppingHistoryCard extends HTMLElement {
     static getConfigElement() { return document.createElement('shopping-history-editor'); }
-    static getStubConfig() { 
+    static getStubConfig(hass) { 
       return { 
         title: "Quản Lý Mua Sắm", 
         icon: "mdi:cart-outline", 
@@ -247,6 +247,8 @@
         shadow_enable: false
       }; 
     }
+
+    getCardSize() { return 3; }
 
     constructor() {
       super();
@@ -317,13 +319,13 @@
         let shouldUpdate = false;
         const relevantSensors = Object.keys(hass.states).filter(k => 
             k.startsWith('sensor.') && 
-            hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-            hass.states[k].attributes.nam !== undefined
+            hass.states[k].attributes?.danh_sach_chi_tiet !== undefined && 
+            hass.states[k].attributes?.nam !== undefined
         );
         const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
             k.startsWith('sensor.') && 
-            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-            oldHass.states[k].attributes.nam !== undefined
+            oldHass.states[k].attributes?.danh_sach_chi_tiet !== undefined && 
+            oldHass.states[k].attributes?.nam !== undefined
         );
 
         if (relevantSensors.length !== oldRelevantSensors.length) {
@@ -363,8 +365,8 @@
 
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
-        this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
-        this._hass.states[eid].attributes.nam !== undefined
+        this._hass.states[eid].attributes?.danh_sach_chi_tiet !== undefined && 
+        this._hass.states[eid].attributes?.nam !== undefined
       );
 
       this._uniqueCategories.clear();
@@ -379,9 +381,9 @@
 
       yearSensors.forEach(eid => {
         const state = this._hass.states[eid];
-        const y = parseInt(state.attributes.nam);
+        const y = parseInt(state.attributes?.nam);
         
-        if (state.attributes.danh_sach_chi_tiet) {
+        if (state.attributes?.danh_sach_chi_tiet) {
             state.attributes.danh_sach_chi_tiet.forEach(item => {
                 if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
                 if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
@@ -392,10 +394,10 @@
         if (!isNaN(y)) {
             let groupId = this._entityRegistryMap[eid] || 
                           (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
-                          state.attributes.config_entry_id;
+                          state.attributes?.config_entry_id;
 
             if (!groupId) {
-                let baseName = state.attributes.friendly_name || eid;
+                let baseName = state.attributes?.friendly_name || eid;
                 groupId = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
             }
 
@@ -405,7 +407,7 @@
             tempGroups[groupId].years.add(y);
             tempGroups[groupId].map[y] = eid;
             
-            let pName = state.attributes.friendly_name || eid;
+            let pName = state.attributes?.friendly_name || eid;
             pName = pName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
             tempGroups[groupId].displayNames.push(pName);
         }
@@ -958,6 +960,7 @@
         this.card.style.display = 'flex';
         this.card.style.flexDirection = 'column';
         this.card.style.overflow = "hidden";
+        this.card.style.isolation = 'isolate';
 
         let c_text = conf.textColor || '#f8fafc';
         let c_accent = conf.accentColor || '#0ea5e9';
@@ -1561,8 +1564,13 @@
     }
   }
 
-  customElements.define('shopping-history-editor', ShoppingHistoryEditor);
-  customElements.define('shopping-history-card', ShoppingHistoryCard);
+  // TRÁNH LỖI OVERWRITE TỪ CACHE CỦA HA COMPANION APP BẰNG VIỆC CHECK TỒN TẠI
+  if (!customElements.get('shopping-history-editor')) {
+      customElements.define('shopping-history-editor', ShoppingHistoryEditor);
+  }
+  if (!customElements.get('shopping-history-card')) {
+      customElements.define('shopping-history-card', ShoppingHistoryCard);
+  }
 
   window.customCards = window.customCards || [];
   window.customCards.push({
