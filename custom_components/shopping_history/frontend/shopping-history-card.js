@@ -22,6 +22,9 @@
     return hex; 
   };
 
+  // ==========================================
+  // 1. LỚP CHỈNH SỬA GIAO DIỆN UI (EDITOR)
+  // ==========================================
   class ShoppingHistoryEditor extends HTMLElement {
     constructor() {
       super();
@@ -606,8 +609,8 @@
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
           
-          /* ---------- UPDATED GRID COLUMNS FOR VERTICAL ACTION BUTTONS ---------- */
-          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) clamp(32px, 8vw, 45px); padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+          /* ---------- GRID SỬA LẠI: GIỮ CỘT CUỐI CỐ ĐỊNH 36px ĐỂ KHÔNG BỊ TRÀN/LỖI LAYOUT ---------- */
+          .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
           .table-wrapper { flex: 1; overflow: auto; } 
@@ -615,7 +618,7 @@
           .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
           .t-row-container:last-child { border-bottom: none; }
           
-          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) clamp(32px, 8vw, 45px); padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
+          .t-row { display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(6px, 1.5vw, 10px); align-items: center; transition: background 0.2s; gap: 4px; cursor: pointer; }
           .search-header ~ .table-wrapper .t-row, .warranty-header ~ .table-wrapper .t-row { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
 
           .t-row:hover { background: rgba(255, 255, 255, 0.08); }
@@ -636,9 +639,9 @@
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
-          /* ---------- UPDATED FLEX COLUMN FOR ACTION BUTTONS ---------- */
-          .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 6px; }
-          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: clamp(18px, 4vw, 22px); padding: 4px; }
+          /* ---------- ICON NHỎ HƠN, XẾP DỌC CHUẨN XÁC GIỮ NGUYÊN CHIỀU CAO ROW ---------- */
+          .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
+          .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 16px; padding: 2px; line-height: 1; }
           .btn-delete { color: #ef4444; }
           .btn-edit { color: var(--accent); }
           .btn-delete:hover, .btn-edit:hover { opacity: 1; transform: scale(1.1);}
