@@ -146,29 +146,30 @@
       this.addListeners();
     }
 
-    get _card_height() { return this._config?.card_height !== undefined ? this._config.card_height : 600; }
-    get _bg_type() { return this._config?.bg_type || 'gradient'; }
-    get _bg_color() { return this._config?.bg_color || '#1e293b'; }
-    get _bg_opacity() { return this._config?.bg_opacity !== undefined ? this._config.bg_opacity : 70; }
-    get _bg_gradient_preset() { return this._config?.bg_gradient_preset || 'linear-gradient(135deg, #2b5876, #4e4376)'; }
-    get _bg_gradient_color1() { return this._config?.bg_gradient_color1 || '#1e293b'; }
-    get _bg_gradient_color2() { return this._config?.bg_gradient_color2 || '#0f172a'; }
-    get _bg_gradient_angle() { return this._config?.bg_gradient_angle !== undefined ? this._config.bg_gradient_angle : 135; }
-    get _border_enable() { return this._config?.border_enable !== undefined ? this._config.border_enable : false; }
-    get _border_color() { return this._config?.border_color || '#ffffff'; }
-    get _border_width() { return this._config?.border_width !== undefined ? this._config.border_width : 1; }
-    get _border_opacity() { return this._config?.border_opacity !== undefined ? this._config.border_opacity : 10; }
-    get _shadow_enable() { return this._config?.shadow_enable !== undefined ? this._config.shadow_enable : false; }
-    get _shadow_color() { return this._config?.shadow_color || '#000000'; }
-    get _shadow_opacity() { return this._config?.shadow_opacity !== undefined ? this._config.shadow_opacity : 20; }
-    get _shadow_blur() { return this._config?.shadow_blur !== undefined ? this._config.shadow_blur : 32; }
-    get _shadow_offset_x() { return this._config?.shadow_offset_x !== undefined ? this._config.shadow_offset_x : 0; }
-    get _shadow_offset_y() { return this._config?.shadow_offset_y !== undefined ? this._config.shadow_offset_y : 8; }
-    get _auto_contrast() { return this._config?.auto_contrast !== undefined ? this._config.auto_contrast : true; }
-    get _textColor() { return this._config?.textColor || '#f8fafc'; }
-    get _accentColor() { return this._config?.accentColor || '#0ea5e9'; }
-    get _moneyColor() { return this._config?.moneyColor || '#38bdf8'; }
-    get _blockBg() { return this._config?.blockBg || '#1e293b'; }
+    // Fix lỗi WebView trên mobile: Bỏ sử dụng cú pháp Optional Chaining (?.)
+    get _card_height() { return (this._config && this._config.card_height !== undefined) ? this._config.card_height : 600; }
+    get _bg_type() { return (this._config && this._config.bg_type) ? this._config.bg_type : 'gradient'; }
+    get _bg_color() { return (this._config && this._config.bg_color) ? this._config.bg_color : '#1e293b'; }
+    get _bg_opacity() { return (this._config && this._config.bg_opacity !== undefined) ? this._config.bg_opacity : 70; }
+    get _bg_gradient_preset() { return (this._config && this._config.bg_gradient_preset) ? this._config.bg_gradient_preset : 'linear-gradient(135deg, #2b5876, #4e4376)'; }
+    get _bg_gradient_color1() { return (this._config && this._config.bg_gradient_color1) ? this._config.bg_gradient_color1 : '#1e293b'; }
+    get _bg_gradient_color2() { return (this._config && this._config.bg_gradient_color2) ? this._config.bg_gradient_color2 : '#0f172a'; }
+    get _bg_gradient_angle() { return (this._config && this._config.bg_gradient_angle !== undefined) ? this._config.bg_gradient_angle : 135; }
+    get _border_enable() { return (this._config && this._config.border_enable !== undefined) ? this._config.border_enable : false; }
+    get _border_color() { return (this._config && this._config.border_color) ? this._config.border_color : '#ffffff'; }
+    get _border_width() { return (this._config && this._config.border_width !== undefined) ? this._config.border_width : 1; }
+    get _border_opacity() { return (this._config && this._config.border_opacity !== undefined) ? this._config.border_opacity : 10; }
+    get _shadow_enable() { return (this._config && this._config.shadow_enable !== undefined) ? this._config.shadow_enable : false; }
+    get _shadow_color() { return (this._config && this._config.shadow_color) ? this._config.shadow_color : '#000000'; }
+    get _shadow_opacity() { return (this._config && this._config.shadow_opacity !== undefined) ? this._config.shadow_opacity : 20; }
+    get _shadow_blur() { return (this._config && this._config.shadow_blur !== undefined) ? this._config.shadow_blur : 32; }
+    get _shadow_offset_x() { return (this._config && this._config.shadow_offset_x !== undefined) ? this._config.shadow_offset_x : 0; }
+    get _shadow_offset_y() { return (this._config && this._config.shadow_offset_y !== undefined) ? this._config.shadow_offset_y : 8; }
+    get _auto_contrast() { return (this._config && this._config.auto_contrast !== undefined) ? this._config.auto_contrast : true; }
+    get _textColor() { return (this._config && this._config.textColor) ? this._config.textColor : '#f8fafc'; }
+    get _accentColor() { return (this._config && this._config.accentColor) ? this._config.accentColor : '#0ea5e9'; }
+    get _moneyColor() { return (this._config && this._config.moneyColor) ? this._config.moneyColor : '#38bdf8'; }
+    get _blockBg() { return (this._config && this._config.blockBg) ? this._config.blockBg : '#1e293b'; }
 
     updateUI() {
       if (!this.querySelector('#bg_type')) return;
@@ -421,26 +422,16 @@
       }
     }
 
-    async getEntryId(entityId) {
-      if (this._entryIds[entityId]) return this._entryIds[entityId];
-      try {
-        const result = await this._hass.callWS({ type: 'config/entity_registry/get', entity_id: entityId });
-        if (result && result.config_entry_id) {
-            this._entryIds[entityId] = result.config_entry_id;
-            return result.config_entry_id;
-        }
-      } catch (err) {}
-      return null;
-    }
-
-    // --- LOGIC NHÓM MỚI (CHỐNG LỖI ĐỔI TÊN) ---
     async performFullScan() {
       if (!this._hass) return;
 
+      let shoppingEntries = [];
       try {
+          // Lấy trực tiếp danh sách Config Entries để tạo Hồ Sơ kể cả khi Database trống (chưa có sensor)
           const entries = await this._hass.callWS({ type: 'config_entries/get' });
           this._configEntriesMap = {};
-          entries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
+          shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
+          shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
 
           const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
           this._entityRegistryMap = {};
@@ -460,6 +451,11 @@
       this._uniqueManufacturers.clear();
 
       const tempGroups = {};
+
+      // Khởi tạo các nhóm Profile trước từ thông tin Config Entries
+      shoppingEntries.forEach(e => {
+          tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
+      });
 
       yearSensors.forEach(eid => {
         const state = this._hass.states[eid];
@@ -492,10 +488,6 @@
             let pName = state.attributes.friendly_name || eid;
             pName = pName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
             tempGroups[groupId].displayNames.push(pName);
-
-            if(groupId && !this._entryIds[eid]) {
-                this._entryIds[eid] = groupId;
-            }
         }
       });
 
@@ -507,11 +499,13 @@
           let finalName = this._configEntriesMap[gId];
           
           if (!finalName) {
-              const nameCounts = group.displayNames.reduce((acc, name) => {
-                  acc[name] = (acc[name] || 0) + 1;
-                  return acc;
-              }, {});
-              finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
+              if (group.displayNames.length > 0) {
+                  const nameCounts = group.displayNames.reduce((acc, name) => {
+                      acc[name] = (acc[name] || 0) + 1;
+                      return acc;
+                  }, {});
+                  finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
+              }
           }
           if (!finalName) finalName = gId; 
 
@@ -528,7 +522,7 @@
 
       this._profileList.sort((a, b) => a.name.localeCompare(b.name));
       
-      // Fallback nếu ID hiện tại không tồn tại (chưa chọn hoặc bị xóa mất)
+      // Fallback nếu ID hiện tại không tồn tại
       if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) {
           if (this._profileList.length > 0) {
               this._currentProfileId = this._profileList[0].id;
@@ -601,7 +595,6 @@
 
       this._items.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
       
-      // Cập nhật lại giao diện tĩnh (Tabs, Topbar) và Nội dung (Content)
       this.renderHeaderAndTabs();
       this.renderContent();
     }
@@ -630,7 +623,6 @@
         this.card = document.createElement('ha-card');
         this.shadowRoot.appendChild(this.card);
         
-        // Vẽ khung xương HTML 1 lần duy nhất
         this.card.innerHTML = `
           <div id="c-header" class="header"></div>
           <div id="c-topbar" class="top-bar"></div>
@@ -814,18 +806,14 @@
         this.shadowRoot.appendChild(style);
     }
 
-    // --- UỶ QUYỀN SỰ KIỆN TOÀN CỤC (GLOBAL EVENT DELEGATION) ---
-    // Giúp thẻ không bị nháy, không phải addEvent lại nhiều lần
     attachGlobalListeners() {
         this.card.addEventListener('click', (e) => {
-            // Đổi Tabs
             const tab = e.target.closest('.tab[data-target]');
             if (tab) { this.switchTab(tab.dataset.target); return; }
             
             const searchBtn = e.target.closest('.search-tab-btn');
             if (searchBtn) { this.switchTab('search'); return; }
 
-            // Phân trang
             const pageBtn = e.target.closest('.page-btn:not(.disabled)');
             if (pageBtn) {
                 const type = pageBtn.dataset.type;
@@ -836,7 +824,6 @@
                 return;
             }
 
-            // Expand/Collapse Chi Tiết Đơn Hàng (Ẩn hiện CSS - Nhanh và Mượt)
             const tRow = e.target.closest('.t-row');
             const btnDelete = e.target.closest('.btn-delete');
             
@@ -851,7 +838,6 @@
                 const details = tRow.nextElementSibling;
                 const wrapper = tRow.closest('.table-wrapper');
                 
-                // Đóng tất cả row khác trong cùng 1 table
                 if (wrapper) {
                     wrapper.querySelectorAll('.t-row.expanded').forEach(r => {
                         if (r !== tRow) {
@@ -874,10 +860,8 @@
                 return;
             }
 
-            // Nút Thêm ở State Trống
             if (e.target.closest('#btn-empty-add')) { this.switchTab('add'); return; }
 
-            // Nút Nav (Năm/Tháng)
             const navBtn = e.target.closest('.nav-btn:not(.disabled)');
             if (navBtn) {
                 if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.updateData(); }
@@ -887,7 +871,6 @@
                 return;
             }
 
-            // Profile Nav
             const pNav = e.target.closest('.profile-nav');
             if (pNav) {
                 let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
@@ -896,11 +879,9 @@
                 return;
             }
 
-            // Modal Actions
             if (e.target.closest('#btn-cancel-del')) { this.closeDeleteModal(); return; }
             if (e.target.closest('#btn-confirm-del')) { this.executeDelete(); return; }
 
-            // Toggle thêm chi tiết Add Form
             const toggleDetails = e.target.closest('#toggle-details');
             if (toggleDetails) {
                 const detailsContent = this.card.querySelector('#details-content');
@@ -916,7 +897,6 @@
             }
         });
 
-        // Xử lý Select & Slider (Change)
         this.card.addEventListener('change', (e) => {
             if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.updateData(); }
             else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.updateData(); }
@@ -928,7 +908,6 @@
             }
         });
 
-        // Xử lý Input (Đánh chữ Search / Kéo Slider mượt)
         this.card.addEventListener('input', (e) => {
             if (e.target.id === 'search-input') {
                 this._searchKeyword = e.target.value;
@@ -952,7 +931,6 @@
             }
         });
         
-        // Xóa search
         this.card.addEventListener('click', (e) => {
            if(e.target.closest('#clear-search')) {
                const inp = this.card.querySelector('#search-input');
@@ -963,13 +941,12 @@
            } 
         });
 
-        // Form Submit
         this.card.addEventListener('submit', (e) => {
-            if (e.target.id === 'add-order-form') { e.preventDefault(); this.handleAddSubmit(e); }
+            // FIX LỖI CRASH: Phải truyền đúng e.target (thẻ form) vào hàm handleAddSubmit thay vì biến e
+            if (e.target.id === 'add-order-form') { e.preventDefault(); this.handleAddSubmit(e.target); }
         });
     }
 
-    // Cập nhật Theme
     updateTheme() {
         if(!this.card) return;
         const conf = this._config || {};
@@ -1049,7 +1026,9 @@
                 avgG = Math.round(avgG / colorsToCheck.length);
                 avgB = Math.round(avgB / colorsToCheck.length);
 
-                let isDarkTheme = (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) ? this._hass.themes.darkMode : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                // Fix khả năng tương thích webview cũ không nhận window.matchMedia
+                const prefersDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : false;
+                let isDarkTheme = (this._hass && this._hass.themes && this._hass.themes.darkMode !== undefined) ? this._hass.themes.darkMode : prefersDark;
 
                 const op = bgOpacity / 100;
                 const baseBg = isDarkTheme ? 30 : 245; 
@@ -1108,7 +1087,6 @@
         this.card.style.setProperty('--glass-border', hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2));
     }
 
-    // Các hàm render HTML Module
     renderHeaderAndTabs() {
         if(!this._els) return;
         const conf = this._config || {};
@@ -1167,7 +1145,6 @@
           this._els.content.innerHTML = this.getHistoryHTML();
       } else if (this._activeTab === 'search') {
           this._els.content.innerHTML = this.getSearchHTML();
-          // Render màu thanh trượt khởi tạo
           const wSlider = this.card.querySelector('#warranty-slider');
           if(wSlider) {
               const percent = (wSlider.value / 365) * 100;
@@ -1349,7 +1326,7 @@
         const mfgOptions = Array.from(this._uniqueManufacturers).sort().map(m => `<option value="${m}">`).join('');
         const todayStr = new Date().toISOString().split('T')[0];
         
-        const activeProfileName = this._profilesData[this._currentProfileId]?.name || 'Hồ sơ mặc định';
+        const activeProfileName = (this._profilesData[this._currentProfileId] && this._profilesData[this._currentProfileId].name) ? this._profilesData[this._currentProfileId].name : 'Hồ sơ mặc định';
 
         return `
           <div class="add-tab-wrapper fade-in">
@@ -1525,17 +1502,15 @@
     }
 
     async executeDelete() {
-      const currentEid = this._profilesData[this._currentProfileId]?.map[this._selectedYear];
-      if(!currentEid) return;
-      
-      const orderId = this._itemToDelete;
-      
-      const entryId = await this.getEntryId(currentEid);
+      // Dùng trực tiếp _currentProfileId làm entry_id
+      const entryId = this._currentProfileId;
       if (!entryId) {
-          alert("Hệ thống HA chưa cung cấp config_entry_id cho thực thể này.\n\nNguyên nhân có thể do kết nối chậm hoặc tài khoản không có quyền Admin. Vui lòng tải lại trang.");
+          alert("Không tìm thấy ID Hồ sơ!");
           this.closeDeleteModal();
           return;
       }
+      
+      const orderId = this._itemToDelete;
       
       try {
           await this._hass.callService('shopping_history', 'delete_order', { entry_id: entryId, order_id: orderId });
@@ -1547,12 +1522,9 @@
     }
 
     async handleAddSubmit(formEl) {
-      const profileMap = this._profilesData[this._currentProfileId]?.map;
-      const currentEid = profileMap ? Object.values(profileMap)[0] : null; 
-      if (!currentEid) return alert("Chưa có dữ liệu cơ sở cho Hồ sơ này để tiến hành lưu!");
-
-      const entryId = await this.getEntryId(currentEid);
-      if (!entryId) return alert("Hệ thống chưa tải xong kết nối.\n\nVui lòng thử lại sau vài giây hoặc tải lại trang.");
+      // Sử dụng trực tiếp _currentProfileId làm entryId, không cần lệ thuộc sensor
+      const entryId = this._currentProfileId;
+      if (!entryId) return alert("Hệ thống chưa tải xong kết nối hoặc chưa có Hồ sơ.\n\nVui lòng tải lại trang hoặc đợi một chút.");
 
       const data = {
           entry_id: entryId,
