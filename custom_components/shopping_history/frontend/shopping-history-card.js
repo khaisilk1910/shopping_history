@@ -309,6 +309,9 @@
     }
 
     set hass(hass) {
+      // GUARD CLAUSE: Tránh crash nếu Home Assistant đẩy dữ liệu trống (thường gặp lúc vừa restart)
+      if (!hass || !hass.states) return; 
+
       const oldHass = this._hass;
       this._hass = hass;
       
@@ -329,16 +332,19 @@
         if (this._isScanning) return; 
         
         let shouldUpdate = false;
+        
+        // Sử dụng toán tử Optional Chaining (?.) để không bị văng lỗi khi sensor chưa load kịp thuộc tính
         const relevantSensors = Object.keys(hass.states).filter(k => 
             k.startsWith('sensor.') && 
-            hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-            hass.states[k].attributes.nam !== undefined
+            hass.states[k]?.attributes?.danh_sach_chi_tiet !== undefined && 
+            hass.states[k]?.attributes?.nam !== undefined
         );
-        const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
+        
+        const oldRelevantSensors = (oldHass && oldHass.states) ? Object.keys(oldHass.states).filter(k => 
             k.startsWith('sensor.') && 
-            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-            oldHass.states[k].attributes.nam !== undefined
-        );
+            oldHass.states[k]?.attributes?.danh_sach_chi_tiet !== undefined && 
+            oldHass.states[k]?.attributes?.nam !== undefined
+        ) : [];
 
         if (relevantSensors.length !== oldRelevantSensors.length) {
             shouldUpdate = true;
@@ -369,7 +375,7 @@
     }
 
     async performFullScan() {
-      if (!this._hass) return;
+      if (!this._hass || !this._hass.states) return;
 
       let shoppingEntries = [];
       try {
@@ -385,10 +391,11 @@
           console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
       }
 
+      // Safe Check với Optional Chaining
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
-        this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
-        this._hass.states[eid].attributes.nam !== undefined
+        this._hass.states[eid]?.attributes?.danh_sach_chi_tiet !== undefined && 
+        this._hass.states[eid]?.attributes?.nam !== undefined
       );
 
       // Phân tích trạng thái chờ cảm biến do HA khởi động
@@ -422,6 +429,8 @@
 
       yearSensors.forEach(eid => {
         const state = this._hass.states[eid];
+        if (!state || !state.attributes) return;
+
         const y = parseInt(state.attributes.nam);
         
         if (state.attributes.danh_sach_chi_tiet) {
@@ -508,7 +517,7 @@
     }
 
     updateData() {
-      if (!this._hass) return;
+      if (!this._hass || !this._hass.states) return;
 
       this._items = [];
       this._allProfileItems = [];
@@ -525,7 +534,7 @@
 
       Object.values(currentProf.map).forEach(eid => {
           const state = this._hass.states[eid];
-          if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
+          if (state?.attributes?.danh_sach_chi_tiet) {
               this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
           }
       });
@@ -534,7 +543,7 @@
       const yearEid = currentProf.map[this._selectedYear];
       if (yearEid) {
           const yearState = this._hass.states[yearEid];
-          if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
+          if (yearState?.attributes?.danh_sach_chi_tiet) {
               const allItems = yearState.attributes.danh_sach_chi_tiet;
               const mSet = new Set();
               allItems.forEach(i => { if(i.thang) mSet.add(parseInt(i.thang)); });
