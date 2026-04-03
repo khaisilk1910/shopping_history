@@ -101,6 +101,108 @@ add_order:
         text:
           multiline: true
 
+edit_order:
+  name: "Sửa đơn hàng"
+  description: "Cập nhật dữ liệu cho một đơn hàng đã có theo ID."
+  fields:
+    entry_id:
+      name: "Chọn bộ Lịch sử mua sắm *"
+      description: "Chọn tài khoản chứa đơn hàng."
+      required: true
+      selector:
+        config_entry:
+          integration: shopping_history
+    order_id:
+      name: "ID đơn hàng *"
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+    name:
+      name: "Tên hàng hóa *"
+      required: true
+      selector:
+        text:
+    place:
+      name: "Nơi mua hàng *"
+      required: true
+      selector:
+        text:
+    category:
+      name: "Ngành hàng *"
+      required: true
+      selector:
+        text:
+    price:
+      name: "Đơn giá (VNĐ) *"
+      required: true
+      selector:
+        number:
+          min: 0
+          mode: box
+          unit_of_measurement: "VNĐ"
+    quantity:
+      name: "Số lượng *"
+      required: true
+      default: 1
+      selector:
+        number:
+          min: 0.1
+          mode: box
+          step: 1
+    vat:
+      name: "Thuế VAT (%)"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box
+          unit_of_measurement: "%"
+    status:
+      name: "Tình trạng *"
+      required: true
+      default: "Mới"
+      selector:
+        select:
+          options:
+            - "Mới"
+            - "Cũ / Like New"
+            - "Hàng trưng bày"
+            - "Hỏng / Xác"
+    model:
+      name: "Model / Mã sản phẩm"
+      required: false
+      selector:
+        text:
+    manufacturer:
+      name: "Hãng sản xuất"
+      required: false
+      selector:
+        text:
+    warranty_months:
+      name: "Thời gian bảo hành (tháng)"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          mode: box
+          unit_of_measurement: "tháng"
+    purchase_date:
+      name: "Ngày mua"
+      required: false
+      selector:
+        date:
+    note:
+      name: "Ghi chú"
+      required: false
+      selector:
+        text:
+          multiline: true
+
 delete_order:
   name: "Xóa đơn hàng"
   description: "Xóa đơn hàng khỏi cơ sở dữ liệu và tính toán lại thống kê."
