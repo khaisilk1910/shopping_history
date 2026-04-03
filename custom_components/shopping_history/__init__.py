@@ -41,6 +41,23 @@ SERVICE_ADD_ORDER_SCHEMA = vol.Schema({
     vol.Optional("note", default=""): cv.string,
 })
 
+SERVICE_EDIT_ORDER_SCHEMA = vol.Schema({
+    vol.Required("entry_id"): cv.string,
+    vol.Required("order_id"): vol.Coerce(int),
+    vol.Required("name"): cv.string,
+    vol.Required("place"): cv.string,
+    vol.Required("category"): cv.string,
+    vol.Required("price"): vol.Coerce(float),
+    vol.Required("quantity"): vol.Coerce(float),
+    vol.Optional("vat", default=0): vol.Coerce(float),
+    vol.Required("status"): cv.string,
+    vol.Optional("model", default=""): cv.string,
+    vol.Optional("manufacturer", default=""): cv.string,
+    vol.Optional("warranty_months", default=0): vol.Coerce(int),
+    vol.Optional("purchase_date"): cv.string,
+    vol.Optional("note", default=""): cv.string,
+})
+
 SERVICE_DELETE_ORDER_SCHEMA = vol.Schema({
     vol.Required("entry_id"): cv.string,
     vol.Required("order_id"): vol.Coerce(int),
@@ -92,20 +109,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     
     async def handle_add_order(call: ServiceCall):
         entry_id = call.data.get("entry_id")
-        
         entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        if not entry_data:
-            _LOGGER.error(f"Không tìm thấy cấu hình Shopping History cho Entry ID: {entry_id}")
-            return
-
+        if not entry_data: return
         db_path = entry_data["db_path"]
         data = call.data
         
-        if data.get("purchase_date"):
-            purchase_dt = dt_util.parse_date(data["purchase_date"])
-        else:
-            purchase_dt = dt_util.now().date()
-        
+        purchase_dt = dt_util.parse_date(data["purchase_date"]) if data.get("purchase_date") else dt_util.now().date()
         y, m, d = purchase_dt.year, purchase_dt.month, purchase_dt.day
         date_str = purchase_dt.strftime("%Y-%m-%d")
 
@@ -121,7 +130,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         def db_insert_work():
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-
             cursor.execute("""
                 INSERT INTO purchases (
                     ngay_mua, nam, thang, ngay, 
@@ -137,22 +145,62 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 data["model"], data["status"], data["category"], data["manufacturer"],
                 data["warranty_months"], warranty_end_str, data.get("note", "")
             ))
-
             conn.commit()
             conn.close()
 
         await hass.async_add_executor_job(db_insert_work)
-        _LOGGER.info(f"Đã thêm đơn hàng mới vào DB: {db_path}")
+        async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
+
+    async def handle_edit_order(call: ServiceCall):
+        entry_id = call.data.get("entry_id")
+        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+        if not entry_data: return
+        db_path = entry_data["db_path"]
+        data = call.data
+        order_id = data["order_id"]
+        
+        purchase_dt = dt_util.parse_date(data["purchase_date"]) if data.get("purchase_date") else dt_util.now().date()
+        y, m, d = purchase_dt.year, purchase_dt.month, purchase_dt.day
+        date_str = purchase_dt.strftime("%Y-%m-%d")
+
+        total_pre_tax = data["price"] * data["quantity"]
+        vat_amt = total_pre_tax * (data["vat"] / 100) if data["vat"] > 0 else 0
+        total_post_tax = total_pre_tax + vat_amt
+
+        warranty_end_str = ""
+        if data["warranty_months"] > 0:
+            end_date = purchase_dt + relativedelta(months=data["warranty_months"])
+            warranty_end_str = end_date.strftime("%Y-%m-%d")
+
+        def db_update_work():
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE purchases SET
+                    ngay_mua=?, nam=?, thang=?, ngay=?, 
+                    ten_hang=?, noi_mua=?, so_luong=?, don_gia=?, thanh_tien=?, 
+                    vat_percent=?, tien_vat=?, thanh_tien_sau_vat=?, 
+                    model=?, tinh_trang=?, nganh_hang=?, hang_sx=?, 
+                    thoi_gian_bh_thang=?, ngay_het_bh=?, ghi_chu=?
+                WHERE id=?
+            """, (
+                date_str, y, m, d,
+                data["name"], data["place"], data["quantity"], data["price"], total_pre_tax,
+                data["vat"], vat_amt, total_post_tax,
+                data["model"], data["status"], data["category"], data["manufacturer"],
+                data["warranty_months"], warranty_end_str, data.get("note", ""),
+                order_id
+            ))
+            conn.commit()
+            conn.close()
+
+        await hass.async_add_executor_job(db_update_work)
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
 
     async def handle_delete_order(call: ServiceCall):
         entry_id = call.data.get("entry_id")
-        
         entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        if not entry_data:
-            _LOGGER.error(f"Không tìm thấy cấu hình Shopping History cho Entry ID: {entry_id}")
-            return
-
+        if not entry_data: return
         db_path = entry_data["db_path"]
         order_id = call.data["order_id"]
 
@@ -164,10 +212,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             conn.close()
 
         await hass.async_add_executor_job(db_delete_work)
-        _LOGGER.info(f"Đã xóa đơn hàng {order_id} khỏi DB: {db_path}")
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
 
     hass.services.async_register(DOMAIN, "add_order", handle_add_order, schema=SERVICE_ADD_ORDER_SCHEMA)
+    hass.services.async_register(DOMAIN, "edit_order", handle_edit_order, schema=SERVICE_EDIT_ORDER_SCHEMA)
     hass.services.async_register(DOMAIN, "delete_order", handle_delete_order, schema=SERVICE_DELETE_ORDER_SCHEMA)
 
     return True
@@ -204,7 +252,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # Chỉ khởi tạo duy nhất bảng mua hàng gốc
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS purchases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
