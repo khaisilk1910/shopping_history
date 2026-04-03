@@ -289,7 +289,13 @@
 
       this._configEntriesMap = {};
       this._entityRegistryMap = {};
+      
+      // Trạng thái Loading
       this._isScanning = false;
+      this._isLoading = true;
+      this._waitingForSensors = false;
+      this._loadingTimeout = null;
+      
       this._skeletonBuilt = false;
     }
 
@@ -309,7 +315,15 @@
       if (!oldHass) {
         if (!this._isScanning) {
             this._isScanning = true;
-            this.performFullScan().finally(() => { this._isScanning = false; });
+            this.setLoading(true, "Đang khởi tạo kết nối...");
+            this.performFullScan().finally(() => { 
+                this._isScanning = false; 
+                if (!this._waitingForSensors) {
+                    this.setLoading(false);
+                } else {
+                    this.setLoading(true, "Đang đồng bộ dữ liệu từ Home Assistant (Có thể do vừa khởi động lại)...");
+                }
+            });
         }
       } else {
         if (this._isScanning) return; 
@@ -328,6 +342,8 @@
 
         if (relevantSensors.length !== oldRelevantSensors.length) {
             shouldUpdate = true;
+        } else if (this._waitingForSensors && relevantSensors.length > 0) {
+            shouldUpdate = true;
         } else {
             for (let eid of relevantSensors) {
                 if (oldHass.states[eid] !== hass.states[eid]) {
@@ -339,7 +355,15 @@
         
         if (shouldUpdate) {
             this._isScanning = true;
-            this.performFullScan().finally(() => { this._isScanning = false; });
+            if (this._waitingForSensors) {
+                this.setLoading(true, "Đã tải xong cấu hình, đang xử lý dữ liệu...");
+            }
+            this.performFullScan().finally(() => { 
+                this._isScanning = false; 
+                if (!this._waitingForSensors) {
+                    this.setLoading(false);
+                }
+            });
         }
       }
     }
@@ -366,6 +390,25 @@
         this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
         this._hass.states[eid].attributes.nam !== undefined
       );
+
+      // Phân tích trạng thái chờ cảm biến do HA khởi động
+      if (shoppingEntries.length > 0 && yearSensors.length === 0) {
+          this._waitingForSensors = true;
+          // Thiết lập timeout 10s để tránh treo UI vĩnh viễn
+          if (!this._loadingTimeout) {
+              this._loadingTimeout = setTimeout(() => {
+                  this._waitingForSensors = false;
+                  this.setLoading(false);
+                  this._loadingTimeout = null;
+              }, 10000); 
+          }
+      } else {
+          this._waitingForSensors = false;
+          if (this._loadingTimeout) {
+              clearTimeout(this._loadingTimeout);
+              this._loadingTimeout = null;
+          }
+      }
 
       this._uniqueCategories.clear();
       this._uniquePlaces.clear();
@@ -541,14 +584,27 @@
         this.shadowRoot.appendChild(this.card);
         
         this.card.innerHTML = `
-          <div id="c-header" class="header"></div>
-          <div id="c-topbar" class="top-bar"></div>
-          <div id="c-tabs" class="tabs"></div>
-          <div id="c-content" class="tab-content-area"></div>
+          <div id="c-loading" class="loading-container fade-in">
+              <div class="fancy-loader">
+                  <ha-icon class="l-icon" icon="mdi:cart-arrow-up"></ha-icon>
+                  <div class="l-ring"></div>
+              </div>
+              <div class="loading-text">Đang tải dữ liệu...</div>
+              <div class="loading-subtext" id="c-loading-subtext">Khởi tạo kết nối hệ thống</div>
+          </div>
+          <div id="c-main" style="display:none; flex-direction:column; height:100%; flex:1;">
+              <div id="c-header" class="header"></div>
+              <div id="c-topbar" class="top-bar"></div>
+              <div id="c-tabs" class="tabs"></div>
+              <div id="c-content" class="tab-content-area"></div>
+          </div>
           <div id="c-modal"></div>
         `;
         
         this._els = {
+            loading: this.card.querySelector('#c-loading'),
+            loadingSubtext: this.card.querySelector('#c-loading-subtext'),
+            main: this.card.querySelector('#c-main'),
             header: this.card.querySelector('#c-header'),
             topbar: this.card.querySelector('#c-topbar'),
             tabs: this.card.querySelector('#c-tabs'),
@@ -562,6 +618,19 @@
       }
     }
 
+    setLoading(state, message = "Đang tải thông tin từ Home Assistant...") {
+        this._isLoading = state;
+        if (!this._els) return;
+        if (state) {
+            this._els.loading.style.display = 'flex';
+            this._els.main.style.display = 'none';
+            if (this._els.loadingSubtext) this._els.loadingSubtext.textContent = message;
+        } else {
+            this._els.loading.style.display = 'none';
+            this._els.main.style.display = 'flex';
+        }
+    }
+
     injectStaticCSS() {
         const style = document.createElement('style');
         style.textContent = `
@@ -570,6 +639,17 @@
           ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
           ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
+          /* LOADER STYLES */
+          .loading-container { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; text-align: center; }
+          .fancy-loader { position: relative; width: 70px; height: 70px; margin-bottom: 24px; display: flex; align-items: center; justify-content: center; }
+          .fancy-loader .l-ring { position: absolute; top: 0; left: 0; right: 0; bottom: 0; border: 4px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+          .fancy-loader .l-icon { font-size: 32px; color: var(--accent); animation: pulse-icon 1.5s infinite alternate; }
+          .loading-text { font-size: 18px; font-weight: 800; color: var(--text-main); margin-bottom: 8px; letter-spacing: 0.5px; }
+          .loading-subtext { font-size: 13px; color: var(--text-dim); max-width: 80%; line-height: 1.4; }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          @keyframes pulse-icon { 0% { transform: scale(0.85); opacity: 0.8; } 100% { transform: scale(1.1); opacity: 1; text-shadow: 0 0 10px var(--accent); } }
+
+          /* MAIN UI STYLES */
           .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
 
@@ -609,7 +689,6 @@
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
           
-          /* ---------- GRID SỬA LẠI: GIỮ CỘT CUỐI CỐ ĐỊNH 36px ĐỂ KHÔNG BỊ TRÀN/LỖI LAYOUT ---------- */
           .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
@@ -639,7 +718,6 @@
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
-          /* ---------- ICON NHỎ HƠN, XẾP DỌC CHUẨN XÁC GIỮ NGUYÊN CHIỀU CAO ROW ---------- */
           .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
           .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 10px; padding: 2px; line-height: 1; }
           .btn-delete { color: #ef4444; }
