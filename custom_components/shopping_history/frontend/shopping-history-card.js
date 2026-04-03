@@ -11,11 +11,6 @@
     return dateString;
   };
 
-  const safeDate = (dateString) => {
-    if (!dateString) return new Date(0);
-    return new Date(dateString.replace(/-/g, '/')); 
-  };
-
   const hexToRgba = (hex, opacity) => {
     let c;
     if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
@@ -282,6 +277,8 @@
       this._searchPage = 1;
       this._warrantyPage = 1;
 
+      this._entryIds = {}; 
+      
       this._uniqueCategories = new Set();
       this._uniquePlaces = new Set();
       this._uniqueManufacturers = new Set();
@@ -290,9 +287,10 @@
       this._itemToDelete = null;
       this._editingOrder = null;
 
-      // Áp dụng Cờ (Flags) giống thẻ electricity để Đọc dữ liệu thụ động
-      this._initialized = false;
-      this._loadStartTime = null;
+      this._configEntriesMap = {};
+      this._entityRegistryMap = {};
+      this._isScanning = false;
+      this._skeletonBuilt = false;
     }
 
     setConfig(config) {
@@ -300,64 +298,73 @@
       this._config = config;
       this.renderInit();
       this.updateTheme();
-      if (this._hass) {
-         this.scanForInstances();
-         this.processData();
-         this.updateView();
-      }
+      this.renderHeaderAndTabs();
+      if (this._hass) this.updateData();
     }
 
     set hass(hass) {
       const oldHass = this._hass;
       this._hass = hass;
-
-      if (!this._initialized) {
-        this.scanForInstances();
-        this.processData();
-        this.updateView();
-        this._initialized = true;
-        return;
-      }
-
-      if (!oldHass) return;
-
-      const relevantSensors = Object.keys(hass.states).filter(k => 
-          k.startsWith('sensor.') && 
-          hass.states[k] && 
-          hass.states[k].attributes && 
-          hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
-          hass.states[k].attributes.nam !== undefined
-      );
-
-      let shouldUpdate = false;
-      if (this._profileList.length === 0 && relevantSensors.length > 0) {
-          shouldUpdate = true; // Dữ liệu mới vừa được nạp vào
+      
+      if (!oldHass) {
+        if (!this._isScanning) {
+            this._isScanning = true;
+            this.performFullScan().finally(() => { this._isScanning = false; });
+        }
       } else {
-          for (let eid of relevantSensors) {
-              if (!oldHass.states[eid] || oldHass.states[eid] !== hass.states[eid]) {
-                  shouldUpdate = true;
-                  break;
-              }
-          }
-      }
+        if (this._isScanning) return; 
+        
+        let shouldUpdate = false;
+        const relevantSensors = Object.keys(hass.states).filter(k => 
+            k.startsWith('sensor.') && 
+            hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+            hass.states[k].attributes.nam !== undefined
+        );
+        const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
+            k.startsWith('sensor.') && 
+            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+            oldHass.states[k].attributes.nam !== undefined
+        );
 
-      if (shouldUpdate) {
-          this.scanForInstances();
-          this.processData();
-          this.updateView();
+        if (relevantSensors.length !== oldRelevantSensors.length) {
+            shouldUpdate = true;
+        } else {
+            for (let eid of relevantSensors) {
+                if (oldHass.states[eid] !== hass.states[eid]) {
+                    shouldUpdate = true;
+                    break;
+                }
+            }
+        }
+        
+        if (shouldUpdate) {
+            this._isScanning = true;
+            this.performFullScan().finally(() => { this._isScanning = false; });
+        }
       }
     }
 
-    // Đọc thụ động: HOÀN TOÀN BỎ API WebSocket gây nghẽn
-    scanForInstances() {
-      if (!this._hass || !this._hass.states) return;
+    async performFullScan() {
+      if (!this._hass) return;
+
+      let shoppingEntries = [];
+      try {
+          const entries = await this._hass.callWS({ type: 'config_entries/get' });
+          this._configEntriesMap = {};
+          shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
+          shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
+
+          const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
+          this._entityRegistryMap = {};
+          entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
+      } catch (err) {
+          console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
+      }
 
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
-          eid.startsWith('sensor.') && 
-          this._hass.states[eid] && 
-          this._hass.states[eid].attributes && 
-          this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
-          this._hass.states[eid].attributes.nam !== undefined
+        eid.startsWith('sensor.') && 
+        this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+        this._hass.states[eid].attributes.nam !== undefined
       );
 
       this._uniqueCategories.clear();
@@ -366,38 +373,42 @@
 
       const tempGroups = {};
 
+      shoppingEntries.forEach(e => {
+          tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
+      });
+
       yearSensors.forEach(eid => {
-          const state = this._hass.states[eid];
-          if (!state || !state.attributes) return;
+        const state = this._hass.states[eid];
+        const y = parseInt(state.attributes.nam);
+        
+        if (state.attributes.danh_sach_chi_tiet) {
+            state.attributes.danh_sach_chi_tiet.forEach(item => {
+                if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
+                if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
+                if (item.hang_sx) this._uniqueManufacturers.add(item.hang_sx.trim());
+            });
+        }
+        
+        if (!isNaN(y)) {
+            let groupId = this._entityRegistryMap[eid] || 
+                          (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
+                          state.attributes.config_entry_id;
 
-          const y = parseInt(state.attributes.nam);
-          
-          if (state.attributes.danh_sach_chi_tiet) {
-              state.attributes.danh_sach_chi_tiet.forEach(item => {
-                  if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
-                  if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
-                  if (item.hang_sx) this._uniqueManufacturers.add(item.hang_sx.trim());
-              });
-          }
-          
-          if (!isNaN(y)) {
-              // Tự động phân loại dựa trên thông tin sẵn có thay vì gửi WS
-              let groupId = (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) || state.attributes.config_entry_id;
+            if (!groupId) {
+                let baseName = state.attributes.friendly_name || eid;
+                groupId = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+            }
 
-              let baseName = state.attributes.friendly_name || eid;
-              baseName = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-
-              if (!groupId) {
-                  groupId = baseName;
-              }
-
-              if (!tempGroups[groupId]) { 
-                  tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
-              }
-              tempGroups[groupId].years.add(y);
-              tempGroups[groupId].map[y] = eid;
-              tempGroups[groupId].displayNames.push(baseName);
-          }
+            if (!tempGroups[groupId]) { 
+                tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
+            }
+            tempGroups[groupId].years.add(y);
+            tempGroups[groupId].map[y] = eid;
+            
+            let pName = state.attributes.friendly_name || eid;
+            pName = pName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+            tempGroups[groupId].displayNames.push(pName);
+        }
       });
 
       this._profilesData = {};
@@ -405,21 +416,24 @@
 
       Object.keys(tempGroups).forEach(gId => {
           const group = tempGroups[gId];
+          let finalName = this._configEntriesMap[gId];
           
-          let finalName = gId;
-          if (group.displayNames.length > 0) {
-              const nameCounts = group.displayNames.reduce((acc, name) => {
-                  acc[name] = (acc[name] || 0) + 1;
-                  return acc;
-              }, {});
-              finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
+          if (!finalName) {
+              if (group.displayNames.length > 0) {
+                  const nameCounts = group.displayNames.reduce((acc, name) => {
+                      acc[name] = (acc[name] || 0) + 1;
+                      return acc;
+                  }, {});
+                  finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
+              }
           }
+          if (!finalName) finalName = gId; 
 
           let counter = 1;
           let uniqueName = finalName;
           while (this._profileList.some(p => p.name === uniqueName)) {
-              uniqueName = `${finalName} (${counter})`;
-              counter++;
+             uniqueName = `${finalName} (${counter})`;
+             counter++;
           }
 
           this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map };
@@ -446,9 +460,11 @@
       } else {
           this._availableYears = [];
       }
+
+      this.updateData();
     }
 
-    processData() {
+    updateData() {
       if (!this._hass) return;
 
       this._items = [];
@@ -457,6 +473,8 @@
       this._availableMonths = [];
       
       if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) { 
+          this.renderHeaderAndTabs();
+          this.renderContent();
           return; 
       }
       
@@ -468,7 +486,7 @@
               this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
           }
       });
-      this._allProfileItems.sort((a, b) => safeDate(b.ngay_mua) - safeDate(a.ngay_mua));
+      this._allProfileItems.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
 
       const yearEid = currentProf.map[this._selectedYear];
       if (yearEid) {
@@ -494,12 +512,15 @@
           }
       }
 
-      this._items.sort((a, b) => safeDate(b.ngay_mua) - safeDate(a.ngay_mua));
+      this._items.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
+      
+      this.renderHeaderAndTabs();
+      this.renderContent();
     }
 
     getDaysUntilExpiry(endDateStr) {
       if (!endDateStr) return null;
-      const end = safeDate(endDateStr);
+      const end = new Date(endDateStr);
       if (isNaN(end.getTime())) return null;
       const now = new Date();
       now.setHours(0,0,0,0); end.setHours(0,0,0,0);
@@ -537,6 +558,7 @@
         
         this.attachGlobalListeners();
         this.injectStaticCSS();
+        this._skeletonBuilt = true;
       }
     }
 
@@ -587,6 +609,7 @@
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
           
+          /* ---------- GRID SỬA LẠI: GIỮ CỘT CUỐI CỐ ĐỊNH 36px ĐỂ KHÔNG BỊ TRÀN/LỖI LAYOUT ---------- */
           .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
@@ -616,6 +639,7 @@
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
+          /* ---------- ICON NHỎ HƠN, XẾP DỌC CHUẨN XÁC GIỮ NGUYÊN CHIỀU CAO ROW ---------- */
           .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
           .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 10px; padding: 2px; line-height: 1; }
           .btn-delete { color: #ef4444; }
@@ -776,7 +800,7 @@
 
             if (e.target.closest('#btn-cancel-edit')) {
                 this._editingOrder = null;
-                this.updateView();
+                this.renderContent();
                 return;
             }
 
@@ -790,18 +814,18 @@
 
             const navBtn = e.target.closest('.nav-btn:not(.disabled)');
             if (navBtn) {
-                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.processData(); this.updateView(); }
-                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.processData(); this.updateView(); }
-                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.processData(); this.updateView(); }
-                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.processData(); this.updateView(); }
+                if (navBtn.id === 'prev-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx + 1]; this.updateData(); }
+                else if (navBtn.id === 'next-year') { const idx = this._availableYears.indexOf(this._selectedYear); this._selectedYear = this._availableYears[idx - 1]; this.updateData(); }
+                else if (navBtn.id === 'prev-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx - 1]; this.updateData(); }
+                else if (navBtn.id === 'next-month') { const mArr = ['all', ...this._availableMonths]; const cM = this._selectedMonth === 'all' ? 'all' : parseInt(this._selectedMonth); const idx = mArr.indexOf(cM); this._selectedMonth = mArr[idx + 1]; this.updateData(); }
                 return;
             }
 
             const pNav = e.target.closest('.profile-nav');
             if (pNav) {
                 let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
-                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.processData(); this.updateView(); }
-                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.processData(); this.updateView(); }
+                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.updateData(); }
+                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.updateData(); }
                 return;
             }
 
@@ -824,9 +848,9 @@
         });
 
         this.card.addEventListener('change', (e) => {
-            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.processData(); this.updateView(); }
-            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.processData(); this.updateView(); }
-            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.processData(); this.updateView(); }
+            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.updateData(); }
+            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.updateData(); }
+            else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.updateData(); }
             else if (e.target.id === 'warranty-slider') {
                 this._warrantyDays = parseInt(e.target.value);
                 this._warrantyPage = 1;
@@ -1070,54 +1094,12 @@
       this._historyPage = 1;
       this._searchPage = 1;
       this._warrantyPage = 1;
-      this.updateView();
+      this.renderHeaderAndTabs();
+      this.renderContent();
     }
 
-    updateView() {
+    renderContent() {
       if(!this._els) return;
-
-      // Xử lý Loader thụ động (Passive Loader)
-      if (this._profileList.length === 0) {
-          if (!this._loadStartTime) this._loadStartTime = Date.now();
-          
-          if (Date.now() - this._loadStartTime > 20000) {
-              this._els.content.innerHTML = `
-                  <div style="padding: 24px 16px; text-align: center; border-radius: 12px; background: rgba(220, 38, 38, 0.1); border: 1px dashed rgba(220, 38, 38, 0.3); margin-top: 12px;">
-                      <ha-icon icon="mdi:alert-circle-outline" style="color: #dc2626; font-size: 32px; margin-bottom: 8px;"></ha-icon>
-                      <div style="color: #dc2626; font-weight: bold; font-size: 14px;">Chưa tìm thấy dữ liệu mua sắm.</div>
-                      <div style="color: #ef4444; font-size: 12px; margin-top: 4px;">Vui lòng kiểm tra lại Tích hợp trong Home Assistant.</div>
-                  </div>`;
-              this._els.topbar.style.display = 'none';
-              this._els.tabs.style.display = 'none';
-          } else {
-              this._els.content.innerHTML = `
-                  <style>
-                      .ha-card-loader { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; gap: 16px; min-height: 150px; }
-                      .loader-spinner { width: 36px; height: 36px; border: 3px solid var(--divider-color, rgba(120, 120, 120, 0.2)); border-top-color: var(--accent); border-radius: 50%; animation: ha-spin 1s linear infinite; }
-                      .loader-text { text-align: center; font-family: sans-serif; font-size: 14px; font-weight: 600; color: var(--text-dim); animation: ha-pulse 1.5s ease-in-out infinite; }
-                      @keyframes ha-spin { to { transform: rotate(360deg); } }
-                      @keyframes ha-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
-                  </style>
-                  <div class="ha-card-loader">
-                      <div class="loader-spinner"></div>
-                      <div class="loader-text">Đang đồng bộ dữ liệu Mua sắm...
-                      <br>Vui lòng chờ dữ liệu đang được nạp
-                      </div>
-                  </div>
-              `;
-              this._els.topbar.style.display = 'none';
-              this._els.tabs.style.display = 'none';
-              setTimeout(() => { if (this._profileList.length === 0) this.updateView(); }, 1000);
-          }
-          return;
-      } else {
-          this._loadStartTime = null; 
-          this._els.topbar.style.display = 'flex';
-          this._els.tabs.style.display = 'flex';
-      }
-
-      this.renderHeaderAndTabs();
-
       if (this._activeTab === 'history') {
           this._els.content.innerHTML = this.getHistoryHTML();
       } else if (this._activeTab === 'search') {
@@ -1572,20 +1554,15 @@
           await this._hass.callService('shopping_history', serviceName, data);
           formEl.reset();
           this._editingOrder = null;
-          this.updateView();
+          this.switchTab('history');
       } catch(err) {
           alert("Lỗi khi lưu: " + err.message);
       }
     }
   }
 
-  // Chống lỗi crash khi App load lại trang và Element đã được khai báo
-  if (!customElements.get('shopping-history-editor')) {
-    customElements.define('shopping-history-editor', ShoppingHistoryEditor);
-  }
-  if (!customElements.get('shopping-history-card')) {
-    customElements.define('shopping-history-card', ShoppingHistoryCard);
-  }
+  customElements.define('shopping-history-editor', ShoppingHistoryEditor);
+  customElements.define('shopping-history-card', ShoppingHistoryCard);
 
   window.customCards = window.customCards || [];
   window.customCards.push({
