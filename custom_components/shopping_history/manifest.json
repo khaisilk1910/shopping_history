@@ -1,7 +1,7 @@
 {
   "domain": "shopping_history",
   "name": "Lịch Sử Mua Hàng",
-  "version": "2026.04.07",
+  "version": "2026.04.06",
   "documentation": "https://github.com/khaisilk1910/shopping_history",
   "dependencies": [],
   "codeowners": [
