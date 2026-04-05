@@ -26,23 +26,9 @@
   // 1. LỚP CHỈNH SỬA GIAO DIỆN UI (EDITOR)
   // ==========================================
   class ShoppingHistoryEditor extends HTMLElement {
-    constructor() {
-      super();
-      this._config = {}; 
-    }
-
-    setConfig(config) {
-      this._config = config || {};
-      if (this._rendered) this.updateUI();
-    }
-
-    set hass(hass) {
-      this._hass = hass;
-      if (!this._rendered) {
-        this.render();
-        this._rendered = true;
-      }
-    }
+    constructor() { super(); this._config = {}; }
+    setConfig(config) { this._config = config || {}; if (this._rendered) this.updateUI(); }
+    set hass(hass) { this._hass = hass; if (!this._rendered) { this.render(); this._rendered = true; } }
 
     render() {
       if (!this._hass) return;
@@ -87,7 +73,6 @@
           <div class="section collapsed"><div class="section-title"><div class="title-left">☁️ Đổ bóng (Shadow)</div><div class="title-right"><input type="checkbox" id="shadow_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="shadow_settings"><div class="row"><span class="label">Màu bóng</span><div class="input-group"><input type="color" id="shadow_color" class="config-trigger"><span class="val-badge" id="shadow_color_val"></span></div></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="shadow_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_opacity_val"></span></div><div class="row"><span class="label">Độ nhòe</span><input type="range" id="shadow_blur" class="config-trigger" min="0" max="100"><span class="val-badge" id="shadow_blur_val"></span></div><div class="row"><span class="label">Offset X</span><input type="range" id="shadow_offset_x" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_x_val"></span></div><div class="row"><span class="label">Offset Y</span><input type="range" id="shadow_offset_y" class="config-trigger" min="-50" max="50"><span class="val-badge" id="shadow_offset_y_val"></span></div></div></div></div>
         </div>
       `;
-
       this.updateUI();
       this.addListeners();
     }
@@ -295,6 +280,21 @@
       this._skeletonBuilt = false;
     }
 
+    // --- CÁC HÀM QUẢN LÝ VÒNG ĐỜI MỚI THÊM ĐỂ CHỐNG LỖI ---
+    connectedCallback() {
+        if (this._config && !this._skeletonBuilt) {
+            this.renderInit();
+            this.updateTheme();
+            this.renderHeaderAndTabs();
+        }
+    }
+
+    disconnectedCallback() {
+        // Hủy các tiến trình ngầm nếu thẻ bị người dùng ẩn/tắt đi
+        this._isScanning = false;
+    }
+    // ----------------------------------------------------
+
     setConfig(config) {
       if (!config) throw new Error("Cấu hình không hợp lệ");
       this._config = config;
@@ -306,7 +306,7 @@
 
     set hass(hass) {
       try {
-          if (!hass || !hass.states) return; // Bảo vệ khỏi crash khi HA truyền hass rỗng
+          if (!hass || !hass.states) return; 
           
           const oldHass = this._hass;
           this._hass = hass;
@@ -359,16 +359,22 @@
       let shoppingEntries = [];
       try {
           const entries = await this._hass.callWS({ type: 'config_entries/get' });
+          if (!this.isConnected) return; // Dừng lại nếu thẻ đã bị tắt mất
+
           this._configEntriesMap = {};
           shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
           shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
 
           const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
+          if (!this.isConnected) return; // Kiểm tra lại lần nữa
+
           this._entityRegistryMap = {};
           entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
       } catch (err) {
           console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
       }
+
+      if (!this.isConnected) return;
 
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
@@ -399,7 +405,6 @@
         }
         
         if (!isNaN(y)) {
-            // An toàn hơn khi check entities
             let groupId = this._entityRegistryMap[eid] || 
                           (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
                           (state.attributes ? state.attributes.config_entry_id : null);
@@ -475,7 +480,8 @@
     }
 
     updateData() {
-      if (!this._hass || !this._hass.states) return;
+      // Chỉ cập nhật dữ liệu DOM nếu thẻ đang được hiển thị (isConnected = true)
+      if (!this._hass || !this._hass.states || !this.isConnected) return;
 
       this._items = [];
       this._allProfileItems = [];
