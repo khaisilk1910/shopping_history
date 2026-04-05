@@ -296,7 +296,7 @@
     }
 
     setConfig(config) {
-      if (!config) throw new Error("Invalid configuration");
+      if (!config) throw new Error("Cấu hình không hợp lệ");
       this._config = config;
       this.renderInit();
       this.updateTheme();
@@ -305,49 +305,56 @@
     }
 
     set hass(hass) {
-      const oldHass = this._hass;
-      this._hass = hass;
-      
-      if (!oldHass) {
-        if (!this._isScanning) {
-            this._isScanning = true;
-            this.performFullScan().finally(() => { this._isScanning = false; });
-        }
-      } else {
-        if (this._isScanning) return; 
-        
-        let shouldUpdate = false;
-        const relevantSensors = Object.keys(hass.states).filter(k => 
-            k.startsWith('sensor.') && 
-            hass.states[k].attributes?.danh_sach_chi_tiet !== undefined && 
-            hass.states[k].attributes?.nam !== undefined
-        );
-        const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
-            k.startsWith('sensor.') && 
-            oldHass.states[k].attributes?.danh_sach_chi_tiet !== undefined && 
-            oldHass.states[k].attributes?.nam !== undefined
-        );
+      try {
+          if (!hass || !hass.states) return; // Bảo vệ khỏi crash khi HA truyền hass rỗng
+          
+          const oldHass = this._hass;
+          this._hass = hass;
+          
+          if (!oldHass) {
+            if (!this._isScanning) {
+                this._isScanning = true;
+                this.performFullScan().then(() => { this._isScanning = false; }).catch((err) => { console.error(err); this._isScanning = false; });
+            }
+          } else {
+            if (this._isScanning) return; 
+            if (!oldHass || !oldHass.states) return;
+            
+            let shouldUpdate = false;
+            const relevantSensors = Object.keys(hass.states).filter(k => 
+                k.startsWith('sensor.') && 
+                hass.states[k].attributes && hass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+                hass.states[k].attributes.nam !== undefined
+            );
+            const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
+                k.startsWith('sensor.') && 
+                oldHass.states[k].attributes && oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined && 
+                oldHass.states[k].attributes.nam !== undefined
+            );
 
-        if (relevantSensors.length !== oldRelevantSensors.length) {
-            shouldUpdate = true;
-        } else {
-            for (let eid of relevantSensors) {
-                if (oldHass.states[eid] !== hass.states[eid]) {
-                    shouldUpdate = true;
-                    break;
+            if (relevantSensors.length !== oldRelevantSensors.length) {
+                shouldUpdate = true;
+            } else {
+                for (let eid of relevantSensors) {
+                    if (oldHass.states[eid] !== hass.states[eid]) {
+                        shouldUpdate = true;
+                        break;
+                    }
                 }
             }
-        }
-        
-        if (shouldUpdate) {
-            this._isScanning = true;
-            this.performFullScan().finally(() => { this._isScanning = false; });
-        }
+            
+            if (shouldUpdate) {
+                this._isScanning = true;
+                this.performFullScan().then(() => { this._isScanning = false; }).catch((err) => { console.error(err); this._isScanning = false; });
+            }
+          }
+      } catch (e) {
+          console.warn("Shopping History Card: Lỗi trong quá trình nhận hass", e);
       }
     }
 
     async performFullScan() {
-      if (!this._hass) return;
+      if (!this._hass || !this._hass.states) return;
 
       let shoppingEntries = [];
       try {
@@ -365,8 +372,8 @@
 
       const yearSensors = Object.keys(this._hass.states).filter(eid => 
         eid.startsWith('sensor.') && 
-        this._hass.states[eid].attributes?.danh_sach_chi_tiet !== undefined && 
-        this._hass.states[eid].attributes?.nam !== undefined
+        this._hass.states[eid].attributes && this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+        this._hass.states[eid].attributes.nam !== undefined
       );
 
       this._uniqueCategories.clear();
@@ -381,9 +388,9 @@
 
       yearSensors.forEach(eid => {
         const state = this._hass.states[eid];
-        const y = parseInt(state.attributes?.nam);
+        const y = parseInt(state.attributes ? state.attributes.nam : undefined);
         
-        if (state.attributes?.danh_sach_chi_tiet) {
+        if (state.attributes && state.attributes.danh_sach_chi_tiet) {
             state.attributes.danh_sach_chi_tiet.forEach(item => {
                 if (item.nganh_hang) this._uniqueCategories.add(item.nganh_hang.trim());
                 if (item.noi_mua) this._uniquePlaces.add(item.noi_mua.trim());
@@ -392,12 +399,13 @@
         }
         
         if (!isNaN(y)) {
+            // An toàn hơn khi check entities
             let groupId = this._entityRegistryMap[eid] || 
                           (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
-                          state.attributes?.config_entry_id;
+                          (state.attributes ? state.attributes.config_entry_id : null);
 
             if (!groupId) {
-                let baseName = state.attributes?.friendly_name || eid;
+                let baseName = (state.attributes && state.attributes.friendly_name) ? state.attributes.friendly_name : eid;
                 groupId = baseName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
             }
 
@@ -407,7 +415,7 @@
             tempGroups[groupId].years.add(y);
             tempGroups[groupId].map[y] = eid;
             
-            let pName = state.attributes?.friendly_name || eid;
+            let pName = (state.attributes && state.attributes.friendly_name) ? state.attributes.friendly_name : eid;
             pName = pName.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
             tempGroups[groupId].displayNames.push(pName);
         }
@@ -467,7 +475,7 @@
     }
 
     updateData() {
-      if (!this._hass) return;
+      if (!this._hass || !this._hass.states) return;
 
       this._items = [];
       this._allProfileItems = [];
@@ -488,7 +496,7 @@
               this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
           }
       });
-      this._allProfileItems.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
+      this._allProfileItems.sort((a, b) => new Date(b.ngay_mua || 0) - new Date(a.ngay_mua || 0));
 
       const yearEid = currentProf.map[this._selectedYear];
       if (yearEid) {
@@ -514,7 +522,7 @@
           }
       }
 
-      this._items.sort((a, b) => new Date(b.ngay_mua) - new Date(a.ngay_mua));
+      this._items.sort((a, b) => new Date(b.ngay_mua || 0) - new Date(a.ngay_mua || 0));
       
       this.renderHeaderAndTabs();
       this.renderContent();
@@ -611,7 +619,6 @@
 
           .table-container { background: var(--block-bg); border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; display: flex; flex-direction: column; flex: 1; margin-top: 12px;}
           
-          /* ---------- GRID SỬA LẠI: GIỮ CỘT CUỐI CỐ ĐỊNH 36px ĐỂ KHÔNG BỊ TRÀN/LỖI LAYOUT ---------- */
           .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
@@ -641,7 +648,6 @@
           .price-val { font-size: clamp(12px, 3.5vw, 15px); font-weight: 800; color: var(--text-main); white-space: nowrap;}
           .price-qty { font-size: clamp(10px, 2.5vw, 11px); color: var(--text-dim); margin-top: 2px; font-weight: 600;}
           
-          /* ---------- ICON NHỎ HƠN, XẾP DỌC CHUẨN XÁC GIỮ NGUYÊN CHIỀU CAO ROW ---------- */
           .col-action { display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2; gap: 4px; padding-right: 2px;}
           .btn-delete, .btn-edit { opacity: 0.6; cursor: pointer; transition: 0.2s; font-size: 10px; padding: 2px; line-height: 1; }
           .btn-delete { color: #ef4444; }
