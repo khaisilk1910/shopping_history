@@ -22,15 +22,6 @@
     return hex; 
   };
 
-  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[char]));
-
-
   // ==========================================
   // 1. LỚP CHỈNH SỬA GIAO DIỆN UI (EDITOR)
   // ==========================================
@@ -302,15 +293,10 @@
       this._entityRegistryMap = {};
       this._isScanning = false;
       this._skeletonBuilt = false;
-
-      this._retryTimer = null;
-      this._retryCount = 0;
-      this._maxRetryCount = 8;
-      this._retryDelay = 1500;
-      this._pendingRescan = false;
-      this._searchDebounceTimer = null;
-      this._isLoading = true;
-      this._loadingMessage = 'Đang tải dữ liệu Shopping History...';
+      
+      // Biến trạng thái xử lý lỗi
+      this._isError = false;
+      this._errorMsg = '';
     }
 
     connectedCallback() {
@@ -319,72 +305,6 @@
           this.updateTheme();
           this.renderHeaderAndTabs();
           this.updateData();
-      }
-    }
-
-    disconnectedCallback() {
-      if (this._retryTimer) {
-        clearTimeout(this._retryTimer);
-        this._retryTimer = null;
-      }
-      if (this._searchDebounceTimer) {
-        clearTimeout(this._searchDebounceTimer);
-        this._searchDebounceTimer = null;
-      }
-    }
-
-    getRelevantSensorIds(states) {
-      return Object.keys(states || {}).filter(eid => {
-        const entity = states[eid];
-        return eid.startsWith('sensor.') &&
-          entity &&
-          entity.attributes &&
-          entity.attributes.danh_sach_chi_tiet !== undefined &&
-          entity.attributes.nam !== undefined;
-      });
-    }
-
-    scheduleRescan(delay = this._retryDelay) {
-      if (this._retryCount >= this._maxRetryCount || !this.isConnected) return;
-      if (this._retryTimer) clearTimeout(this._retryTimer);
-
-      this._retryTimer = setTimeout(() => {
-        this._retryTimer = null;
-        if (!this._hass || this._isScanning) return;
-        this._retryCount += 1;
-        this.runFullScan({ showLoading: true });
-      }, delay);
-    }
-
-    clearRescanTimer() {
-      if (this._retryTimer) {
-        clearTimeout(this._retryTimer);
-        this._retryTimer = null;
-      }
-    }
-
-    async runFullScan({ showLoading = false } = {}) {
-      if (this._isScanning) {
-        this._pendingRescan = true;
-        return;
-      }
-
-      this._isScanning = true;
-      if (showLoading && this._profileList.length === 0) {
-        this._isLoading = true;
-        this._loadingMessage = this._retryCount > 0 ? 'Đang đồng bộ lại dữ liệu...' : 'Đang tải dữ liệu Shopping History...';
-        this.renderHeaderAndTabs();
-        this.renderContent();
-      }
-
-      try {
-        await this.performFullScan();
-      } finally {
-        this._isScanning = false;
-        if (this._pendingRescan) {
-          this._pendingRescan = false;
-          this.runFullScan();
-        }
       }
     }
 
@@ -409,35 +329,76 @@
           this.renderInit();
           this.updateTheme();
           this.renderHeaderAndTabs();
-      } else if (oldHass && oldHass.themes?.darkMode !== hass.themes?.darkMode) {
-          this.updateTheme();
       }
-
+      
       if (!oldHass || !oldHass.states) {
-        this.runFullScan({ showLoading: true });
-        return;
-      }
+        if (!this._isScanning) {
+            this._isScanning = true;
+            this.performFullScan().finally(() => { this._isScanning = false; });
+        }
+      } else {
+        if (this._isScanning) return; 
+        
+        let shouldUpdate = false;
+        
+        const relevantSensors = Object.keys(hass.states).filter(k => 
+            k.startsWith('sensor.') && 
+            hass.states[k] &&
+            hass.states[k].attributes && 
+            hass.states[k].attributes.danh_sach_chi_tiet !== undefined
+        );
+        const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
+            k.startsWith('sensor.') && 
+            oldHass.states[k] &&
+            oldHass.states[k].attributes && 
+            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined
+        );
 
-      const relevantSensors = this.getRelevantSensorIds(hass.states);
-      const oldRelevantSensors = this.getRelevantSensorIds(oldHass.states);
-
-      let shouldUpdate = relevantSensors.length !== oldRelevantSensors.length;
-      if (!shouldUpdate) {
-        for (const eid of relevantSensors) {
-          if (oldHass.states[eid] !== hass.states[eid]) {
+        if (relevantSensors.length !== oldRelevantSensors.length) {
             shouldUpdate = true;
-            break;
-          }
+        } else {
+            for (let eid of relevantSensors) {
+                if (oldHass.states[eid] !== hass.states[eid]) {
+                    shouldUpdate = true;
+                    break;
+                }
+            }
+        }
+        
+        if (shouldUpdate) {
+            this._isScanning = true;
+            this.performFullScan().finally(() => { this._isScanning = false; });
         }
       }
+    }
 
-      if (shouldUpdate || (!this._currentProfileId && relevantSensors.length > 0)) {
-        this.runFullScan({ showLoading: !this._currentProfileId });
-      }
+    async forceReload(iconEl) {
+        if (this._isScanning) return; 
+        this._isScanning = true;
+        this._isError = false; 
+        
+        if (iconEl) iconEl.classList.add('spin');
+        
+        try {
+            this._skeletonBuilt = false;
+            this.renderInit();
+            this.updateTheme();
+            await this.performFullScan();
+        } catch (err) {
+            console.error("Lỗi khi tải lại dữ liệu:", err);
+            this._isError = true;
+            this._errorMsg = err.message || String(err);
+            this.renderHeaderAndTabs(); 
+            this.renderError();
+        } finally {
+            if (iconEl) iconEl.classList.remove('spin');
+            this._isScanning = false;
+        }
     }
 
     async performFullScan() {
       if (!this._hass || !this._hass.states) return;
+      this._isError = false;
 
       let shoppingEntries = [];
       try {
@@ -453,190 +414,187 @@
           console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
       }
 
-      const yearSensors = this.getRelevantSensorIds(this._hass.states);
+      try {
+          const yearSensors = Object.keys(this._hass.states).filter(eid => 
+            eid.startsWith('sensor.') && 
+            this._hass.states[eid] &&
+            this._hass.states[eid].attributes && 
+            this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+            this._hass.states[eid].attributes.nam !== undefined
+          );
 
-      this._uniqueCategories.clear();
-      this._uniquePlaces.clear();
-      this._uniqueManufacturers.clear();
+          this._uniqueCategories.clear();
+          this._uniquePlaces.clear();
+          this._uniqueManufacturers.clear();
 
-      if (yearSensors.length === 0) {
-        this._profilesData = {};
-        this._profileList = [];
-        this._currentProfileId = null;
-        this._availableYears = [];
-        this._availableMonths = [];
-        this._items = [];
-        this._allProfileItems = [];
-        this._stats = { orders: 0, items: 0, total: 0 };
-        this._isLoading = this._retryCount < this._maxRetryCount;
-        this._loadingMessage = this._isLoading
-          ? 'Đang chờ Home Assistant nạp sensor Shopping History...'
-          : 'Chưa tìm thấy sensor Shopping History hợp lệ.';
-        this.renderHeaderAndTabs();
-        this.renderContent();
-        if (this._isLoading) this.scheduleRescan();
-        return;
-      }
+          const tempGroups = {};
 
-      const tempGroups = {};
+          shoppingEntries.forEach(e => {
+              tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
+          });
 
-      shoppingEntries.forEach(e => {
-          tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
-      });
-
-      yearSensors.forEach(eid => {
-        try {
-            const state = this._hass.states[eid];
-            const attrs = state.attributes || {};
-            const y = parseInt(attrs.nam);
-            
-            if (attrs.danh_sach_chi_tiet) {
-                attrs.danh_sach_chi_tiet.forEach(item => {
-                    if (item.nganh_hang) this._uniqueCategories.add(String(item.nganh_hang).trim());
-                    if (item.noi_mua) this._uniquePlaces.add(String(item.noi_mua).trim());
-                    if (item.hang_sx) this._uniqueManufacturers.add(String(item.hang_sx).trim());
-                });
-            }
-            
-            if (!isNaN(y)) {
-                let groupId = this._entityRegistryMap[eid] || 
-                              (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
-                              attrs.config_entry_id;
-
-                if (!groupId) {
-                    let baseName = attrs.friendly_name || eid;
-                    groupId = String(baseName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-                }
-
-                if (!tempGroups[groupId]) { 
-                    tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
-                }
-                tempGroups[groupId].years.add(y);
-                tempGroups[groupId].map[y] = eid;
+          yearSensors.forEach(eid => {
+            try {
+                const state = this._hass.states[eid];
+                const attrs = state.attributes || {};
+                const y = parseInt(attrs.nam);
                 
-                let pName = attrs.friendly_name || eid;
-                pName = String(pName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-                tempGroups[groupId].displayNames.push(pName);
+                if (attrs.danh_sach_chi_tiet) {
+                    attrs.danh_sach_chi_tiet.forEach(item => {
+                        if (item.nganh_hang) this._uniqueCategories.add(String(item.nganh_hang).trim());
+                        if (item.noi_mua) this._uniquePlaces.add(String(item.noi_mua).trim());
+                        if (item.hang_sx) this._uniqueManufacturers.add(String(item.hang_sx).trim());
+                    });
+                }
+                
+                if (!isNaN(y)) {
+                    let groupId = this._entityRegistryMap[eid] || 
+                                  (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
+                                  attrs.config_entry_id;
+
+                    if (!groupId) {
+                        let baseName = attrs.friendly_name || eid;
+                        groupId = String(baseName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+                    }
+
+                    if (!tempGroups[groupId]) { 
+                        tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
+                    }
+                    tempGroups[groupId].years.add(y);
+                    tempGroups[groupId].map[y] = eid;
+                    
+                    let pName = attrs.friendly_name || eid;
+                    pName = String(pName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+                    tempGroups[groupId].displayNames.push(pName);
+                }
+            } catch (e) {
+                console.warn("Lỗi xử lý entity:", eid, e);
             }
-        } catch (e) {
-            console.warn("Lỗi xử lý entity:", eid, e);
-        }
-      });
+          });
 
-      this._profilesData = {};
-      this._profileList = [];
+          this._profilesData = {};
+          this._profileList = [];
 
-      Object.keys(tempGroups).forEach(gId => {
-          const group = tempGroups[gId];
-          let finalName = this._configEntriesMap[gId];
+          Object.keys(tempGroups).forEach(gId => {
+              const group = tempGroups[gId];
+              let finalName = this._configEntriesMap[gId];
+              
+              if (!finalName) {
+                  if (group.displayNames.length > 0) {
+                      const nameCounts = group.displayNames.reduce((acc, name) => {
+                          acc[name] = (acc[name] || 0) + 1;
+                          return acc;
+                      }, {});
+                      finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
+                  }
+              }
+              if (!finalName) finalName = gId; 
+
+              let counter = 1;
+              let uniqueName = finalName;
+              while (this._profileList.some(p => p.name === uniqueName)) {
+                 uniqueName = `${finalName} (${counter})`;
+                 counter++;
+              }
+
+              this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map };
+              this._profileList.push(this._profilesData[gId]);
+          });
+
+          this._profileList.sort((a, b) => a.name.localeCompare(b.name));
           
-          if (!finalName && group.displayNames.length > 0) {
-              const nameCounts = group.displayNames.reduce((acc, name) => {
-                  acc[name] = (acc[name] || 0) + 1;
-                  return acc;
-              }, {});
-              finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
-          }
-          if (!finalName) finalName = gId; 
-
-          let counter = 1;
-          let uniqueName = finalName;
-          while (this._profileList.some(p => p.name === uniqueName)) {
-             uniqueName = `${finalName} (${counter})`;
-             counter++;
+          if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) {
+              if (this._profileList.length > 0) {
+                  this._currentProfileId = this._profileList[0].id;
+                  this._selectedMonth = 'all'; 
+              } else {
+                  this._currentProfileId = null;
+              }
           }
 
-          this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map };
-          this._profileList.push(this._profilesData[gId]);
-      });
-
-      this._profileList.sort((a, b) => a.name.localeCompare(b.name));
-      
-      if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) {
-          this._currentProfileId = this._profileList.length > 0 ? this._profileList[0].id : null;
-          this._selectedMonth = 'all';
-      }
-
-      if (this._currentProfileId && this._profilesData[this._currentProfileId]) {
-          this._availableYears = Array.from(this._profilesData[this._currentProfileId].years).sort((a, b) => b - a);
-          if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
-              this._selectedYear = this._availableYears[0];
-              this._selectedMonth = 'all';
+          if (this._currentProfileId && this._profilesData[this._currentProfileId]) {
+              this._availableYears = Array.from(this._profilesData[this._currentProfileId].years).sort((a, b) => b - a);
+              if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
+                  this._selectedYear = this._availableYears[0];
+                  this._selectedMonth = 'all';
+              }
+          } else {
+              this._availableYears = [];
           }
-      } else {
-          this._availableYears = [];
-      }
 
-      if (this._profileList.length === 0) {
-        this._isLoading = this._retryCount < this._maxRetryCount;
-        this._loadingMessage = this._isLoading
-          ? 'Đang hoàn tất đồng bộ hồ sơ mua sắm...'
-          : 'Không thể dựng danh sách hồ sơ mua sắm.';
-        if (this._isLoading) this.scheduleRescan();
-      } else {
-        this._isLoading = false;
-        this._retryCount = 0;
-        this.clearRescanTimer();
-      }
+          this.updateData();
 
-      this.updateData();
+      } catch (err) {
+          console.error("Lỗi khi build profile data:", err);
+          this._isError = true;
+          this._errorMsg = err.message || String(err);
+          this.renderHeaderAndTabs();
+          this.renderError();
+      }
     }
 
     updateData() {
       if (!this._hass || !this._hass.states) return;
-
-      this._items = [];
-      this._allProfileItems = [];
-      this._stats = { orders: 0, items: 0, total: 0 };
-      this._availableMonths = [];
       
-      if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) { 
-          this.renderHeaderAndTabs();
-          this.renderContent();
-          return; 
-      }
-      
-      const currentProf = this._profilesData[this._currentProfileId];
-
-      Object.values(currentProf.map).forEach(eid => {
-          const state = this._hass.states[eid];
-          if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
-              this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
+      try {
+          this._items = [];
+          this._allProfileItems = [];
+          this._stats = { orders: 0, items: 0, total: 0 };
+          this._availableMonths = [];
+          
+          if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) { 
+              this.renderHeaderAndTabs();
+              if (!this._isError) this.renderContent();
+              return; 
           }
-      });
-      this._allProfileItems.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
+          
+          const currentProf = this._profilesData[this._currentProfileId];
 
-      const yearEid = currentProf.map[this._selectedYear] || currentProf.map[this._availableYears[0]];
-      if (yearEid) {
-          const yearState = this._hass.states[yearEid];
-          if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
-              const allItems = yearState.attributes.danh_sach_chi_tiet;
-              const mSet = new Set();
-              allItems.forEach(i => { if(i.thang) mSet.add(parseInt(i.thang)); });
-              this._availableMonths = Array.from(mSet).filter(m => !isNaN(m)).sort((a,b) => a - b); 
-              
-              if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth, 10))) {
-                  this._selectedMonth = 'all';
-                  this._items = [...allItems];
-                  this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
-                  this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
-                  this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
-              } else {
-                  this._items = allItems.filter(item => parseInt(item.thang, 10) === parseInt(this._selectedMonth, 10));
-                  this._stats.orders = this._items.length;
-                  this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
-                  this._stats.total = this._items.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+          Object.values(currentProf.map).forEach(eid => {
+              const state = this._hass.states[eid];
+              if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
+                  this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
+              }
+          });
+          this._allProfileItems.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
+
+          const yearEid = currentProf.map[this._selectedYear];
+          if (yearEid) {
+              const yearState = this._hass.states[yearEid];
+              if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
+                  const allItems = yearState.attributes.danh_sach_chi_tiet;
+                  const mSet = new Set();
+                  allItems.forEach(i => { if(i.thang) mSet.add(parseInt(i.thang)); });
+                  this._availableMonths = Array.from(mSet).filter(m => !isNaN(m)).sort((a,b) => a - b); 
+                  
+                  if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth))) {
+                      this._selectedMonth = 'all';
+                      this._items = [...allItems];
+                      this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
+                      this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
+                      this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+                  } else {
+                      this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
+                      this._stats.orders = this._items.length;
+                      this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
+                      this._stats.total = this._items.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
+                  }
               }
           }
-      }
 
-      this._items.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
-      this._historyPage = Math.max(1, Math.min(this._historyPage, Math.max(1, Math.ceil(this._items.length / this._itemsPerPage))));
-      this._searchPage = Math.max(1, this._searchPage);
-      this._warrantyPage = Math.max(1, this._warrantyPage);
-      
-      this.renderHeaderAndTabs();
-      this.renderContent();
+          this._items.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
+          
+          this.renderHeaderAndTabs();
+          if (!this._isError) {
+             this.renderContent();
+          }
+      } catch (err) {
+          console.error("Lỗi khi update UI data:", err);
+          this._isError = true;
+          this._errorMsg = err.message || String(err);
+          this.renderHeaderAndTabs();
+          this.renderError();
+      }
     }
 
     getDaysUntilExpiry(endDateStr) {
@@ -693,8 +651,15 @@
           ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
           ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-          .header { display: flex; align-items: center; gap: 12px; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
+          .header { display: flex; align-items: center; justify-content: space-between; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
+          .header-left { display: flex; align-items: center; gap: 12px; }
           .header ha-icon, .header .emoji-icon { color: var(--text-main); opacity: 0.9; }
+          
+          .btn-reload { cursor: pointer; color: var(--text-dim); transition: 0.2s; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
+          .btn-reload ha-icon { display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; line-height: 1; }
+          .btn-reload:hover { color: var(--accent); background: rgba(255,255,255,0.1); }
+          .spin { animation: spin-anim 1s linear infinite; color: var(--accent); }
+          @keyframes spin-anim { 100% { transform: rotate(360deg); } }
 
           .top-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; align-items: stretch; height: 36px; width: 100%; box-sizing: border-box;}
           .profile-selector { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); border-radius: 12px; padding: 0 8px; border: 1px solid var(--glass-border); margin: 0;}
@@ -840,20 +805,15 @@
           .empty-title { font-size: 18px; font-weight: 700; color: var(--text-main); }
           .empty-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; max-width: 80%; line-height: 1.4;}
 
-          .loading-state { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 220px; }
-          .loading-card { width: 100%; max-width: 320px; text-align: center; padding: 20px 18px; border-radius: 16px; background: var(--block-bg); border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
-          .loading-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.14); border-top-color: var(--accent); margin: 0 auto 14px; animation: spin 0.9s linear infinite; }
-          .loading-title { font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; }
-          .loading-sub { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
-          .table-wrapper { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
-          .t-row-container { contain: layout paint; }
+          .error-state { text-align: center; padding: 32px 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-main); flex: 1;}
+          .error-state ha-icon { font-size: 64px; color: #ef4444; margin-bottom: 8px;}
+          .error-msg { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; max-width: 90%; line-height: 1.4; word-break: break-word;}
 
           .fade-in { animation: fadeIn 0.3s ease-out forwards; }
           .fade-in-fast { animation: fadeIn 0.15s ease-out forwards; }
           .zoom-in { animation: zoomIn 0.2s ease-out forwards; }
           @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
           @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         `;
         this.shadowRoot.appendChild(style);
     }
@@ -861,6 +821,15 @@
     attachGlobalListeners() {
         if(!this.card) return;
         this.card.addEventListener('click', (e) => {
+            const btnReload = e.target.closest('#btn-reload');
+            const btnErrorReload = e.target.closest('#btn-error-reload');
+            
+            if (btnReload || btnErrorReload) {
+                const iconEl = btnReload ? btnReload.querySelector('ha-icon') : btnErrorReload.querySelector('ha-icon');
+                this.forceReload(iconEl);
+                return;
+            }
+
             const tab = e.target.closest('.tab[data-target]');
             if (tab) { this.switchTab(tab.dataset.target); return; }
             
@@ -1000,12 +969,8 @@
                     ic.icon = 'mdi:close-circle'; ic.id = 'clear-search'; ic.className = 'clear-icon';
                     e.target.parentElement.appendChild(ic);
                 } else if (!this._searchKeyword && clearIcon) { clearIcon.remove(); }
-
-                if (this._searchDebounceTimer) clearTimeout(this._searchDebounceTimer);
-                this._searchDebounceTimer = setTimeout(() => {
-                    this._searchDebounceTimer = null;
-                    this.renderSearchDynamic();
-                }, 120);
+                
+                this.renderSearchDynamic();
             } 
             else if (e.target.id === 'warranty-slider') {
                 const val = e.target.value;
@@ -1094,11 +1059,6 @@
         this.card.style.flexDirection = 'column';
         this.card.style.overflow = "hidden";
         this.card.style.isolation = 'isolate';
-        this.card.style.boxSizing = 'border-box';
-        this.card.style.transition = 'background 160ms ease, border-color 160ms ease, box-shadow 160ms ease';
-        if (!shadowEnabled) {
-          this.card.style.boxShadow = 'var(--ha-card-box-shadow, none)';
-        }
 
         let c_text = conf.textColor || '#f8fafc';
         let c_accent = conf.accentColor || '#0ea5e9';
@@ -1189,28 +1149,37 @@
     renderHeaderAndTabs() {
         if(!this._els) return;
         const conf = this._config || {};
-        const title = escapeHtml(conf.title || "Quản Lý Mua Sắm");
+        const title = conf.title || "Quản Lý Mua Sắm";
         const configIcon = conf.icon || "mdi:cart-outline";
-        const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${escapeHtml(configIcon)}"></ha-icon>` : `<span class="emoji-icon">${escapeHtml(configIcon)}</span>`;
+        const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
 
-        this._els.header.innerHTML = `${iconHtml} ${title}`;
+        this._els.header.innerHTML = `
+            <div class="header-left">${iconHtml} ${title}</div>
+            <div class="btn-reload" id="btn-reload" title="Tải lại dữ liệu"><ha-icon icon="mdi:refresh"></ha-icon></div>
+        `;
+
+        if (this._isError) {
+            this._els.topbar.innerHTML = '';
+            this._els.tabs.innerHTML = '';
+            return;
+        }
 
         const pIdx = this._profileList.findIndex(p => p.id === this._currentProfileId);
         const prevOpacity = pIdx > 0 ? 0.8 : 0.2;
         const prevPointer = pIdx > 0 ? 'auto' : 'none';
         const nextOpacity = pIdx < this._profileList.length - 1 ? 0.8 : 0.2;
         const nextPointer = pIdx < this._profileList.length - 1 ? 'auto' : 'none';
-        const profileOptions = this._profileList.length > 0
-          ? this._profileList.map(p => `<option value="${escapeHtml(p.id)}" ${this._currentProfileId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
-          : `<option value="">${this._isLoading ? 'Đang tải dữ liệu...' : 'Chưa có dữ liệu'}</option>`;
 
         this._els.topbar.innerHTML = `
             <div class="profile-selector">
                 <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
                 <div class="profile-info-wrapper">
                     <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
-                    <select id="profile-select" ${this._profileList.length === 0 ? 'disabled' : ''}>
-                        ${profileOptions}
+                    <select id="profile-select">
+                        ${this._profileList.length > 0 
+                            ? this._profileList.map(p => `<option value="${p.id}" ${this._currentProfileId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')
+                            : `<option value="">Chưa có dữ liệu</option>`
+                        }
                     </select>
                 </div>
                 <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
@@ -1228,6 +1197,18 @@
         `;
     }
 
+    renderError() {
+        if(!this._els) return;
+        this._els.content.innerHTML = `
+            <div class="error-state fade-in">
+                <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
+                <div class="empty-title">Lỗi tải dữ liệu</div>
+                <div class="error-msg">${this._errorMsg}</div>
+                <button class="btn-primary" id="btn-error-reload"><ha-icon icon="mdi:refresh"></ha-icon> Thử Tải Lại Thẻ</button>
+            </div>
+        `;
+    }
+
     switchTab(tabName) {
       if (tabName !== 'add') this._editingOrder = null;
       this._activeTab = tabName;
@@ -1240,12 +1221,7 @@
     }
 
     renderContent() {
-      if(!this._els) return;
-      if (this._isLoading && this._profileList.length === 0) {
-          this._els.content.innerHTML = this.getLoadingHTML();
-          return;
-      }
-
+      if(!this._els || this._isError) return;
       if (this._activeTab === 'history') {
           this._els.content.innerHTML = this.getHistoryHTML();
       } else if (this._activeTab === 'search') {
@@ -1258,18 +1234,6 @@
       } else if (this._activeTab === 'add') {
           this._els.content.innerHTML = this.getAddHTML();
       }
-    }
-
-    getLoadingHTML() {
-      return `
-        <div class="loading-state fade-in">
-          <div class="loading-card">
-            <div class="loading-spinner"></div>
-            <div class="loading-title">Đang nạp thẻ mua sắm</div>
-            <div class="loading-sub">${escapeHtml(this._loadingMessage || 'Đang khởi tạo dữ liệu từ Home Assistant...')}</div>
-          </div>
-        </div>
-      `;
     }
 
     getHistoryHTML() {
@@ -1288,7 +1252,7 @@
             <div class="control-box">
               <ha-icon class="nav-btn ${yPrevDisabled}" id="prev-year" icon="mdi:chevron-left"></ha-icon>
               <select id="year-select">
-                ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${escapeHtml(y)}</option>`).join('')}
+                ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
                 ${this._availableYears.length === 0 ? `<option value="">---</option>` : ''}
               </select>
               <ha-icon class="nav-btn ${yNextDisabled}" id="next-year" icon="mdi:chevron-right"></ha-icon>
@@ -1297,7 +1261,7 @@
               <ha-icon class="nav-btn ${mPrevDisabled}" id="prev-month" icon="mdi:chevron-left"></ha-icon>
               <select id="month-select">
                 <option value="all" ${this._selectedMonth === 'all' ? 'selected' : ''}>Cả năm</option>
-                ${this._availableMonths.map(m => `<option value="${m}" ${this._selectedMonth == m ? 'selected' : ''}>Tháng ${escapeHtml(m)}</option>`).join('')}
+                ${this._availableMonths.map(m => `<option value="${m}" ${this._selectedMonth == m ? 'selected' : ''}>Tháng ${m}</option>`).join('')}
               </select>
               <ha-icon class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
             </div>
@@ -1437,9 +1401,9 @@
     }
 
     getAddHTML() {
-        const catOptions = Array.from(this._uniqueCategories).sort().map(c => `<option value="${escapeHtml(c)}">`).join('');
-        const placeOptions = Array.from(this._uniquePlaces).sort().map(p => `<option value="${escapeHtml(p)}">`).join('');
-        const mfgOptions = Array.from(this._uniqueManufacturers).sort().map(m => `<option value="${escapeHtml(m)}">`).join('');
+        const catOptions = Array.from(this._uniqueCategories).sort().map(c => `<option value="${c}">`).join('');
+        const placeOptions = Array.from(this._uniquePlaces).sort().map(p => `<option value="${p}">`).join('');
+        const mfgOptions = Array.from(this._uniqueManufacturers).sort().map(m => `<option value="${m}">`).join('');
         const todayStr = new Date().toISOString().split('T')[0];
         
         const activeProfileName = (this._profilesData[this._currentProfileId] && this._profilesData[this._currentProfileId].name) ? this._profilesData[this._currentProfileId].name : 'Hồ sơ mặc định';
@@ -1478,7 +1442,7 @@
           <form id="add-order-form">
             <div class="form-title">
               <ha-icon icon="${isEdit ? 'mdi:pencil-box-multiple-outline' : 'mdi:cart-plus'}"></ha-icon> 
-              ${escapeHtml(titleText)}
+              ${titleText}
             </div>
             
             <datalist id="cat-list">${catOptions}</datalist>
@@ -1488,36 +1452,36 @@
             <div class="form-row">
               <div class="f-group">
                 <label>Tên hàng hóa <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_name" required value="${escapeHtml(v_name)}" placeholder="VD: iPhone 15 Pro Max">
+                <input type="text" id="f_name" required value="${v_name}" placeholder="VD: iPhone 15 Pro Max">
               </div>
             </div>
 
             <div class="form-row split">
               <div class="f-group">
                 <label>Nơi mua <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_place" required list="place-list" value="${escapeHtml(v_place)}" placeholder="VD: Shopee">
+                <input type="text" id="f_place" required list="place-list" value="${v_place}" placeholder="VD: Shopee">
               </div>
               <div class="f-group">
                 <label>Ngành hàng <span style="color:var(--money)">*</span></label>
-                <input type="text" id="f_category" required list="cat-list" value="${escapeHtml(v_cat)}" placeholder="VD: Công nghệ">
+                <input type="text" id="f_category" required list="cat-list" value="${v_cat}" placeholder="VD: Công nghệ">
               </div>
             </div>
 
             <div class="form-row split">
               <div class="f-group">
                 <label>Đơn giá (VNĐ) <span style="color:var(--money)">*</span></label>
-                <input type="number" id="f_price" required min="0" value="${escapeHtml(v_price)}" placeholder="0">
+                <input type="number" id="f_price" required min="0" value="${v_price}" placeholder="0">
               </div>
               <div class="f-group" style="flex: 0.5;">
                 <label>Số lượng <span style="color:var(--money)">*</span></label>
-                <input type="number" id="f_qty" required min="0.1" step="0.1" value="${escapeHtml(v_qty)}">
+                <input type="number" id="f_qty" required min="0.1" step="0.1" value="${v_qty}">
               </div>
             </div>
 
             <div class="form-row split">
               <div class="f-group">
                 <label>Ngày mua</label>
-                <input type="date" id="f_date" value="${escapeHtml(v_date)}">
+                <input type="date" id="f_date" value="${v_date}">
               </div>
               <div class="f-group">
                 <label>Tình trạng <span style="color:var(--money)">*</span></label>
@@ -1531,34 +1495,34 @@
             </div>
 
             <div class="form-details-toggle" id="toggle-details">
-              <span>${escapeHtml(detailText)}</span> <ha-icon icon="${detailIcon}"></ha-icon>
+              <span>${detailText}</span> <ha-icon icon="${detailIcon}"></ha-icon>
             </div>
 
             <div class="form-details-content" id="details-content" style="display:${showDetails};">
               <div class="form-row split">
                 <div class="f-group">
                   <label>Mã Model</label>
-                  <input type="text" id="f_model" value="${escapeHtml(v_model)}" placeholder="Mã sản phẩm">
+                  <input type="text" id="f_model" value="${v_model}" placeholder="Mã sản phẩm">
                 </div>
                 <div class="f-group">
                   <label>Hãng SX</label>
-                  <input type="text" id="f_manufacturer" list="mfg-list" value="${escapeHtml(v_mfg)}" placeholder="Thương hiệu">
+                  <input type="text" id="f_manufacturer" list="mfg-list" value="${v_mfg}" placeholder="Thương hiệu">
                 </div>
               </div>
               <div class="form-row split">
                 <div class="f-group">
                   <label>Thuế VAT (%)</label>
-                  <input type="number" id="f_vat" min="0" max="100" value="${escapeHtml(v_vat)}">
+                  <input type="number" id="f_vat" min="0" max="100" value="${v_vat}">
                 </div>
                 <div class="f-group">
                   <label>Bảo hành (tháng)</label>
-                  <input type="number" id="f_warranty" min="0" value="${escapeHtml(v_war)}">
+                  <input type="number" id="f_warranty" min="0" value="${v_war}">
                 </div>
               </div>
               <div class="form-row">
                 <div class="f-group">
                   <label>Ghi chú</label>
-                  <textarea id="f_note" placeholder="Nhập ghi chú cho đơn hàng..." rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit; resize: vertical;">${escapeHtml(v_note)}</textarea>
+                  <textarea id="f_note" placeholder="Nhập ghi chú cho đơn hàng..." rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.15); border: 1px solid var(--glass-border); color: var(--text-main); padding: 10px 12px; border-radius: 8px; font-size: 14px; outline: none; transition: 0.2s; font-family: inherit; resize: vertical;">${v_note}</textarea>
                 </div>
               </div>
             </div>
@@ -1566,7 +1530,7 @@
             <div style="display: flex; gap: 12px; margin-top: 16px;">
                 ${isEdit ? `<button type="button" class="btn-primary" id="btn-cancel-edit" style="background: rgba(255,255,255,0.1); color: var(--text-main); flex: 0.4;"><ha-icon icon="mdi:close"></ha-icon> Hủy</button>` : ''}
                 <button type="submit" class="btn-primary" style="flex: 1; font-size: 16px; padding: 12px;">
-                  <ha-icon icon="${iconSave}"></ha-icon> ${escapeHtml(btnText)}
+                  <ha-icon icon="${iconSave}"></ha-icon> ${btnText}
                 </button>
             </div>
           </form>
@@ -1580,51 +1544,43 @@
        return itemsArray.map(item => {
           const bhStatus = this.checkWarrantyStatus(item.ngay_het_bh);
           const isExpanded = this._expandedOrderId === item.id;
-          const safeId = escapeHtml(item.id);
-          const safeName = escapeHtml(item.ten_hang || '--');
-          const safePlace = escapeHtml(item.noi_mua || '--');
-          const safeCategory = escapeHtml(item.nganh_hang || '--');
-          const safeStatus = escapeHtml(item.tinh_trang || 'Mới');
-          const safeManufacturer = escapeHtml(item.hang_sx || '--');
-          const safeModel = escapeHtml(item.model || '--');
-          const safeNote = escapeHtml(item.ghi_chu || '--');
-          const safeWarrantyText = escapeHtml(bhStatus.text);
+          
           let dateStr = isSearchMode ? formatDate(item.ngay_mua) : (formatDate(item.ngay_mua).split('/').length >= 2 ? `${formatDate(item.ngay_mua).split('/')[0]}/${formatDate(item.ngay_mua).split('/')[1]}` : formatDate(item.ngay_mua));
 
           return `
           <div class="t-row-container">
-              <div class="t-row ${isExpanded ? 'expanded' : ''}" data-id="${safeId}">
+              <div class="t-row ${isExpanded ? 'expanded' : ''}" data-id="${item.id}">
                 <div class="col-date" style="${isSearchMode ? 'font-size: 10px;' : ''}">
-                  <div>${escapeHtml(dateStr)}</div>
-                  <div class="d-id">ID: ${safeId}</div>
+                  <div>${dateStr}</div>
+                  <div class="d-id">ID: ${item.id}</div>
                 </div>
                 <div class="col-info">
-                  <div class="info-name">${safeName}</div>
+                  <div class="info-name">${item.ten_hang}</div>
                   <div class="info-sub">
-                      ${item.thoi_gian_bh_thang ? escapeHtml(item.thoi_gian_bh_thang) + ' tháng' : 'Không BH'} | 
-                      <span class="warranty-date ${bhStatus.class}">${safeWarrantyText}</span>
+                      ${item.thoi_gian_bh_thang ? item.thoi_gian_bh_thang + ' tháng' : 'Không BH'} | 
+                      <span class="warranty-date ${bhStatus.class}">${bhStatus.text}</span>
                   </div>
                 </div>
                 <div class="col-price">
                   <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
-                  <div class="price-qty">SL: ${escapeHtml(item.so_luong)}</div>
+                  <div class="price-qty">SL: ${item.so_luong}</div>
                 </div>
                 ${!isSearchMode ? `
                 <div class="col-action">
-                  <ha-icon class="btn-edit" icon="mdi:pencil-outline" data-id="${safeId}" title="Sửa"></ha-icon>
-                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${safeId}" title="Xóa"></ha-icon>
+                  <ha-icon class="btn-edit" icon="mdi:pencil-outline" data-id="${item.id}" title="Sửa"></ha-icon>
+                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
                 </div>` : ''}
               </div>
               
               <div class="row-details slide-down" style="display: ${isExpanded ? 'block' : 'none'};">
                  <div class="detail-grid">
-                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${safePlace}</span></div>
-                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${safeCategory}</span></div>
-                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${safeStatus}</span></div>
-                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${safeManufacturer}</span></div>
-                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${safeModel}</span></div>
-                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${escapeHtml(item.vat_percent || 0)}%</span></div>
-                    <div class="d-item" style="grid-column: 1 / -1; margin-top: 4px;"><span class="d-lbl">Ghi chú:</span> <span class="d-val" style="white-space: normal; line-height: 1.4;">${safeNote}</span></div>
+                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${item.noi_mua || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${item.nganh_hang || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.hang_sx || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat_percent || 0}%</span></div>
+                    <div class="d-item" style="grid-column: 1 / -1; margin-top: 4px;"><span class="d-lbl">Ghi chú:</span> <span class="d-val" style="white-space: normal; line-height: 1.4;">${item.ghi_chu || '--'}</span></div>
                  </div>
               </div>
           </div>
@@ -1681,7 +1637,6 @@
       try {
           await this._hass.callService('shopping_history', 'delete_order', { entry_id: entryId, order_id: orderId });
           this.closeDeleteModal();
-          this.runFullScan({ showLoading: false });
       } catch(err) {
           alert("Lỗi khi xóa từ Home Assistant: " + err.message);
           this.closeDeleteModal();
@@ -1721,7 +1676,6 @@
           formEl.reset();
           this._editingOrder = null;
           this.switchTab('history');
-          this.runFullScan({ showLoading: false });
       } catch(err) {
           alert("Lỗi khi lưu: " + err.message);
       }
