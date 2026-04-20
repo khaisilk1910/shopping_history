@@ -12,6 +12,7 @@
   };
 
   const hexToRgba = (hex, opacity) => {
+    if (!hex || typeof hex !== 'string') return 'transparent';
     let c;
     if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
       c= hex.substring(1).split('');
@@ -292,83 +293,78 @@
       this._configEntriesMap = {};
       this._entityRegistryMap = {};
       this._isScanning = false;
-      this._skeletonBuilt = false;
-      
-      // Biến trạng thái xử lý lỗi
+      this._trackedEntities = []; 
       this._isError = false;
       this._errorMsg = '';
-    }
 
-    connectedCallback() {
-      if (this._config && this._hass && !this._skeletonBuilt) {
-          this.renderInit();
-          this.updateTheme();
-          this.renderHeaderAndTabs();
-          this.updateData();
-      }
+      // TẠO DOM NGAY TỪ ĐẦU (Chống Race Condition)
+      this.card = document.createElement('ha-card');
+      this.shadowRoot.appendChild(this.card);
+      this.card.innerHTML = `
+        <div id="c-header" class="header"></div>
+        <div id="c-topbar" class="top-bar"></div>
+        <div id="c-tabs" class="tabs"></div>
+        <div id="c-content" class="tab-content-area"></div>
+        <div id="c-modal"></div>
+      `;
+      
+      this._els = {
+          header: this.card.querySelector('#c-header'),
+          topbar: this.card.querySelector('#c-topbar'),
+          tabs: this.card.querySelector('#c-tabs'),
+          content: this.card.querySelector('#c-content'),
+          modal: this.card.querySelector('#c-modal')
+      };
+      
+      this.injectStaticCSS();
+      this.attachGlobalListeners();
     }
 
     setConfig(config) {
-      if (!config) throw new Error("Invalid configuration");
-      this._config = config;
-      if (!this._skeletonBuilt) {
-          this.renderInit();
+      if (!config) return;
+      try {
+          this._config = config;
+          this.updateTheme();
+          this.renderHeaderAndTabs();
+          if (this._hass) this.updateData();
+      } catch (err) {
+          console.error("Shopping History: Error in setConfig", err);
+          this._isError = true;
+          this._errorMsg = "Lỗi thiết lập thẻ: " + err.message;
+          this.renderError();
       }
-      this.updateTheme();
-      this.renderHeaderAndTabs();
-      if (this._hass) this.updateData();
     }
 
     set hass(hass) {
-      if (!hass || !hass.states) return; 
-      
-      const oldHass = this._hass;
-      this._hass = hass;
+      try {
+          if (!hass || !hass.states) return; 
+          const oldHass = this._hass;
+          this._hass = hass;
 
-      if (!this._skeletonBuilt) {
-          this.renderInit();
-          this.updateTheme();
-          this.renderHeaderAndTabs();
-      }
-      
-      if (!oldHass || !oldHass.states) {
-        if (!this._isScanning) {
-            this._isScanning = true;
-            this.performFullScan().finally(() => { this._isScanning = false; });
-        }
-      } else {
-        if (this._isScanning) return; 
-        
-        let shouldUpdate = false;
-        
-        const relevantSensors = Object.keys(hass.states).filter(k => 
-            k.startsWith('sensor.') && 
-            hass.states[k] &&
-            hass.states[k].attributes && 
-            hass.states[k].attributes.danh_sach_chi_tiet !== undefined
-        );
-        const oldRelevantSensors = Object.keys(oldHass.states).filter(k => 
-            k.startsWith('sensor.') && 
-            oldHass.states[k] &&
-            oldHass.states[k].attributes && 
-            oldHass.states[k].attributes.danh_sach_chi_tiet !== undefined
-        );
+          // Chạy Full Scan ở lần kết nối đầu tiên
+          if (!oldHass) {
+              this.performFullScan();
+              return;
+          }
 
-        if (relevantSensors.length !== oldRelevantSensors.length) {
-            shouldUpdate = true;
-        } else {
-            for (let eid of relevantSensors) {
-                if (oldHass.states[eid] !== hass.states[eid]) {
-                    shouldUpdate = true;
-                    break;
-                }
-            }
-        }
-        
-        if (shouldUpdate) {
-            this._isScanning = true;
-            this.performFullScan().finally(() => { this._isScanning = false; });
-        }
+          if (this._isScanning) return; 
+          
+          // TỐI ƯU HÓA HIỆU NĂNG: CHỈ KIỂM TRA NHỮNG SENSOR QUẢN LÝ MUA SẮM ĐÃ LƯU
+          let shouldUpdate = false;
+          if (this._trackedEntities && this._trackedEntities.length > 0) {
+              for (let eid of this._trackedEntities) {
+                  if (oldHass.states[eid] !== hass.states[eid]) {
+                      shouldUpdate = true;
+                      break;
+                  }
+              }
+          }
+
+          if (shouldUpdate) {
+              this.performFullScan();
+          }
+      } catch (err) {
+          console.error("Shopping History: Error in set hass", err);
       }
     }
 
@@ -380,8 +376,6 @@
         if (iconEl) iconEl.classList.add('spin');
         
         try {
-            this._skeletonBuilt = false;
-            this.renderInit();
             this.updateTheme();
             await this.performFullScan();
         } catch (err) {
@@ -397,24 +391,25 @@
     }
 
     async performFullScan() {
-      if (!this._hass || !this._hass.states) return;
+      if (!this._hass || !this._hass.states || this._isScanning) return;
+      this._isScanning = true;
       this._isError = false;
 
-      let shoppingEntries = [];
       try {
-          const entries = await this._hass.callWS({ type: 'config_entries/get' });
-          this._configEntriesMap = {};
-          shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
-          shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
+          let shoppingEntries = [];
+          try {
+              const entries = await this._hass.callWS({ type: 'config_entries/get' });
+              this._configEntriesMap = {};
+              shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
+              shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
 
-          const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
-          this._entityRegistryMap = {};
-          entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
-      } catch (err) {
-          console.warn("Shopping History: Không thể kết nối API HA WebSocket. Sẽ dùng fallback.", err);
-      }
+              const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
+              this._entityRegistryMap = {};
+              entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
+          } catch (wsErr) {
+              console.warn("Shopping History: callWS fallback.", wsErr);
+          }
 
-      try {
           const yearSensors = Object.keys(this._hass.states).filter(eid => 
             eid.startsWith('sensor.') && 
             this._hass.states[eid] &&
@@ -422,6 +417,9 @@
             this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
             this._hass.states[eid].attributes.nam !== undefined
           );
+
+          // LƯU LẠI DANH SÁCH ENTITY ĐỂ TỐI ƯU CHO LẦN `set hass` TIẾP THEO
+          this._trackedEntities = yearSensors;
 
           this._uniqueCategories.clear();
           this._uniquePlaces.clear();
@@ -530,6 +528,8 @@
           this._errorMsg = err.message || String(err);
           this.renderHeaderAndTabs();
           this.renderError();
+      } finally {
+          this._isScanning = false;
       }
     }
 
@@ -614,37 +614,10 @@
       return { text: formatDate(endDateStr), class: 'valid-warranty' };
     }
 
-    renderInit() {
-      if (this._skeletonBuilt) return;
-
-      if (!this.card) {
-        this.card = document.createElement('ha-card');
-        this.shadowRoot.appendChild(this.card);
-      }
-
-      this.card.innerHTML = `
-        <div id="c-header" class="header"></div>
-        <div id="c-topbar" class="top-bar"></div>
-        <div id="c-tabs" class="tabs"></div>
-        <div id="c-content" class="tab-content-area"></div>
-        <div id="c-modal"></div>
-      `;
-      
-      this._els = {
-          header: this.card.querySelector('#c-header'),
-          topbar: this.card.querySelector('#c-topbar'),
-          tabs: this.card.querySelector('#c-tabs'),
-          content: this.card.querySelector('#c-content'),
-          modal: this.card.querySelector('#c-modal')
-      };
-      
-      this.attachGlobalListeners();
-      this.injectStaticCSS();
-      this._skeletonBuilt = true;
-    }
-
     injectStaticCSS() {
+        if (this.shadowRoot.querySelector('#static-css')) return;
         const style = document.createElement('style');
+        style.id = 'static-css';
         style.textContent = `
           ::-webkit-scrollbar { width: 6px; height: 6px; }
           ::-webkit-scrollbar-track { background: transparent; }
@@ -1683,7 +1656,6 @@
   }
 
   // ĐĂNG KÝ THẺ (CÓ LỚP BẢO VỆ CHỐNG SẬP TRANG)
- 
   const defineOnce = (tag, klass) => {
     if (!customElements.get(tag)) {
       customElements.define(tag, klass);
@@ -1715,6 +1687,5 @@
   } catch (err) {
     console.error('[SHOPPING-HISTORY-CARD] Init error:', err);
   }
-
 
 })();
