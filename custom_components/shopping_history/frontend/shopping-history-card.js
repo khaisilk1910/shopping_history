@@ -253,78 +253,95 @@
 
     constructor() {
       super();
-      this.attachShadow({ mode: 'open' });
-      this._config = {};
       
-      const now = new Date();
-      this._selectedYear = now.getFullYear();
-      this._selectedMonth = 'all'; 
-      
-      this._profilesData = {}; 
-      this._profileList = []; 
-      this._currentProfileId = null; 
-      
-      this._availableYears = [];
-      this._availableMonths = []; 
-      
-      this._allProfileItems = []; 
-      this._items = [];
-      this._stats = { orders: 0, items: 0, total: 0 };
-      
-      this._activeTab = 'history'; 
-      this._searchKeyword = '';
-      this._warrantyDays = 30; 
-      
-      // --- THÊM: Biến cờ ghi nhận lần check bảo hành đầu tiên ---
-      this._initialWarrantyChecked = false; 
+      // BẢO VỆ 1: Tránh lỗi HMR / DOM tái sử dụng đánh sập Constructor
+      try {
+          if (!this.shadowRoot) {
+              this.attachShadow({ mode: 'open' });
+          }
+      } catch (err) {
+          console.warn("[ShoppingHistory] attachShadow error handled:", err);
+      }
 
-      this._itemsPerPage = 10;
-      this._historyPage = 1;
-      this._searchPage = 1;
-      this._warrantyPage = 1;
+      // BẢO VỆ 2: Đảm bảo toàn bộ khối khởi tạo không bị ngắt quãng
+      try {
+          this._config = {};
+          
+          const now = new Date();
+          this._selectedYear = now.getFullYear();
+          this._selectedMonth = 'all'; 
+          
+          this._profilesData = {}; 
+          this._profileList = []; 
+          this._currentProfileId = null; 
+          
+          this._availableYears = [];
+          this._availableMonths = []; 
+          
+          this._allProfileItems = []; 
+          this._items = [];
+          this._stats = { orders: 0, items: 0, total: 0 };
+          
+          this._activeTab = 'history'; 
+          this._searchKeyword = '';
+          this._warrantyDays = 30; 
+          this._initialWarrantyChecked = false; 
 
-      this._entryIds = {}; 
-      
-      this._uniqueCategories = new Set();
-      this._uniquePlaces = new Set();
-      this._uniqueManufacturers = new Set();
-      
-      this._expandedOrderId = null; 
-      this._itemToDelete = null;
-      this._editingOrder = null;
+          this._itemsPerPage = 10;
+          this._historyPage = 1;
+          this._searchPage = 1;
+          this._warrantyPage = 1;
 
-      this._configEntriesMap = {};
-      this._entityRegistryMap = {};
-      this._isScanning = false;
-      this._trackedEntities = []; 
-      this._isError = false;
-      this._errorMsg = '';
+          this._entryIds = {}; 
+          
+          this._uniqueCategories = new Set();
+          this._uniquePlaces = new Set();
+          this._uniqueManufacturers = new Set();
+          
+          this._expandedOrderId = null; 
+          this._itemToDelete = null;
+          this._editingOrder = null;
 
-      // TẠO DOM NGAY TỪ ĐẦU (Chống Race Condition)
-      this.card = document.createElement('ha-card');
-      this.shadowRoot.appendChild(this.card);
-      this.card.innerHTML = `
-        <div id="c-header" class="header"></div>
-        <div id="c-topbar" class="top-bar"></div>
-        <div id="c-tabs" class="tabs"></div>
-        <div id="c-content" class="tab-content-area"></div>
-        <div id="c-modal"></div>
-      `;
-      
-      this._els = {
-          header: this.card.querySelector('#c-header'),
-          topbar: this.card.querySelector('#c-topbar'),
-          tabs: this.card.querySelector('#c-tabs'),
-          content: this.card.querySelector('#c-content'),
-          modal: this.card.querySelector('#c-modal')
-      };
-      
-      this.injectStaticCSS();
-      this.attachGlobalListeners();
+          this._configEntriesMap = {};
+          this._entityRegistryMap = {};
+          this._isScanning = false;
+          this._trackedEntities = []; 
+          this._isError = false;
+          this._errorMsg = '';
+
+          if (!this.card) {
+              this.card = document.createElement('ha-card');
+              this.shadowRoot.appendChild(this.card);
+              this.card.innerHTML = `
+                <div id="c-header" class="header"></div>
+                <div id="c-topbar" class="top-bar"></div>
+                <div id="c-tabs" class="tabs"></div>
+                <div id="c-content" class="tab-content-area"></div>
+                <div id="c-modal"></div>
+              `;
+              
+              this._els = {
+                  header: this.card.querySelector('#c-header'),
+                  topbar: this.card.querySelector('#c-topbar'),
+                  tabs: this.card.querySelector('#c-tabs'),
+                  content: this.card.querySelector('#c-content'),
+                  modal: this.card.querySelector('#c-modal')
+              };
+              
+              this.injectStaticCSS();
+              this.attachGlobalListeners();
+          }
+      } catch (err) {
+          console.error("[ShoppingHistory] Initialization error:", err);
+      }
     }
 
     setConfig(config) {
-      if (!config) return;
+      // BẢO VỆ 3: Ném lỗi chuẩn để HA biết cấu hình sai thay vì crash ngầm
+      if (!config) {
+          throw new Error("Lỗi: Không tìm thấy cấu hình thẻ!");
+      }
+      
       try {
           this._config = config;
           this.updateTheme();
@@ -344,7 +361,6 @@
           const oldHass = this._hass;
           this._hass = hass;
 
-          // Chạy Full Scan ở lần kết nối đầu tiên
           if (!oldHass) {
               this.performFullScan();
               return;
@@ -352,7 +368,6 @@
 
           if (this._isScanning) return; 
           
-          // TỐI ƯU HÓA HIỆU NĂNG: CHỈ KIỂM TRA NHỮNG SENSOR QUẢN LÝ MUA SẮM ĐÃ LƯU
           let shouldUpdate = false;
           if (this._trackedEntities && this._trackedEntities.length > 0) {
               for (let eid of this._trackedEntities) {
@@ -421,7 +436,6 @@
             this._hass.states[eid].attributes.nam !== undefined
           );
 
-          // LƯU LẠI DANH SÁCH ENTITY ĐỂ TỐI ƯU CHO LẦN `set hass` TIẾP THEO
           this._trackedEntities = yearSensors;
 
           this._uniqueCategories.clear();
@@ -561,7 +575,6 @@
           });
           this._allProfileItems.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
 
-          // --- THÊM TÍNH NĂNG TỰ ĐỘNG CHUYỂN TAB TRỞ XUỐNG ---
           if (!this._initialWarrantyChecked) {
               this._initialWarrantyChecked = true;
               const hasExpiringSoon = this._allProfileItems.some(item => {
@@ -572,7 +585,6 @@
                   this._activeTab = 'search';
               }
           }
-          // --- KẾT THÚC THÊM TÍNH NĂNG ---
 
           const yearEid = currentProf.map[this._selectedYear];
           if (yearEid) {
@@ -631,7 +643,7 @@
     }
 
     injectStaticCSS() {
-        if (this.shadowRoot.querySelector('#static-css')) return;
+        if (!this.shadowRoot || this.shadowRoot.querySelector('#static-css')) return;
         const style = document.createElement('style');
         style.id = 'static-css';
         style.textContent = `
@@ -1136,7 +1148,7 @@
     }
 
     renderHeaderAndTabs() {
-        if(!this._els) return;
+        if(!this._els || !this._els.header) return;
         const conf = this._config || {};
         const title = conf.title || "Quản Lý Mua Sắm";
         const configIcon = conf.icon || "mdi:cart-outline";
@@ -1148,8 +1160,8 @@
         `;
 
         if (this._isError) {
-            this._els.topbar.innerHTML = '';
-            this._els.tabs.innerHTML = '';
+            if (this._els.topbar) this._els.topbar.innerHTML = '';
+            if (this._els.tabs) this._els.tabs.innerHTML = '';
             return;
         }
 
@@ -1159,35 +1171,39 @@
         const nextOpacity = pIdx < this._profileList.length - 1 ? 0.8 : 0.2;
         const nextPointer = pIdx < this._profileList.length - 1 ? 'auto' : 'none';
 
-        this._els.topbar.innerHTML = `
-            <div class="profile-selector">
-                <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
-                <div class="profile-info-wrapper">
-                    <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
-                    <select id="profile-select">
-                        ${this._profileList.length > 0 
-                            ? this._profileList.map(p => `<option value="${p.id}" ${this._currentProfileId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')
-                            : `<option value="">Chưa có dữ liệu</option>`
-                        }
-                    </select>
+        if (this._els.topbar) {
+            this._els.topbar.innerHTML = `
+                <div class="profile-selector">
+                    <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
+                    <div class="profile-info-wrapper">
+                        <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
+                        <select id="profile-select">
+                            ${this._profileList.length > 0 
+                                ? this._profileList.map(p => `<option value="${p.id}" ${this._currentProfileId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')
+                                : `<option value="">Chưa có dữ liệu</option>`
+                            }
+                        </select>
+                    </div>
+                    <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
                 </div>
-                <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
-            </div>
-            
-            <div class="tab search-tab-btn ${this._activeTab === 'search' ? 'active' : ''}" data-target="search" title="Tra cứu & Bảo hành">
-                <ha-icon icon="mdi:magnify" style="flex-shrink: 0;"></ha-icon>
-                <span class="st-text">Tra cứu</span>
-            </div>
-        `;
+                
+                <div class="tab search-tab-btn ${this._activeTab === 'search' ? 'active' : ''}" data-target="search" title="Tra cứu & Bảo hành">
+                    <ha-icon icon="mdi:magnify" style="flex-shrink: 0;"></ha-icon>
+                    <span class="st-text">Tra cứu</span>
+                </div>
+            `;
+        }
 
-        this._els.tabs.innerHTML = `
-           <div class="tab ${this._activeTab === 'history' ? 'active' : ''}" data-target="history">📋 Lịch sử</div>
-           <div class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm / Sửa</div>
-        `;
+        if (this._els.tabs) {
+            this._els.tabs.innerHTML = `
+               <div class="tab ${this._activeTab === 'history' ? 'active' : ''}" data-target="history">📋 Lịch sử</div>
+               <div class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm / Sửa</div>
+            `;
+        }
     }
 
     renderError() {
-        if(!this._els) return;
+        if(!this._els || !this._els.content) return;
         this._els.content.innerHTML = `
             <div class="error-state fade-in">
                 <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
@@ -1210,7 +1226,7 @@
     }
 
     renderContent() {
-      if(!this._els || this._isError) return;
+      if(!this._els || !this._els.content || this._isError) return;
       if (this._activeTab === 'history') {
           this._els.content.innerHTML = this.getHistoryHTML();
       } else if (this._activeTab === 'search') {
