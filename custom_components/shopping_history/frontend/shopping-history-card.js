@@ -274,6 +274,9 @@
       this._activeTab = 'history'; 
       this._searchKeyword = '';
       this._warrantyDays = 30; 
+      
+      // --- THÊM: Biến cờ ghi nhận lần check bảo hành đầu tiên ---
+      this._initialWarrantyChecked = false; 
 
       this._itemsPerPage = 10;
       this._historyPage = 1;
@@ -557,6 +560,19 @@
               }
           });
           this._allProfileItems.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
+
+          // --- THÊM TÍNH NĂNG TỰ ĐỘNG CHUYỂN TAB TRỞ XUỐNG ---
+          if (!this._initialWarrantyChecked) {
+              this._initialWarrantyChecked = true;
+              const hasExpiringSoon = this._allProfileItems.some(item => {
+                  const days = this.getDaysUntilExpiry(item.ngay_het_bh);
+                  return days !== null && days >= 0 && days <= 30;
+              });
+              if (hasExpiringSoon) {
+                  this._activeTab = 'search';
+              }
+          }
+          // --- KẾT THÚC THÊM TÍNH NĂNG ---
 
           const yearEid = currentProf.map[this._selectedYear];
           if (yearEid) {
