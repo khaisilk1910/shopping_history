@@ -253,87 +253,126 @@
 
     constructor() {
       super();
-      
-      // BẢO VỆ 1: Tránh lỗi HMR / DOM tái sử dụng đánh sập Constructor
+
+      this._config = {};
+
+      const now = new Date();
+      this._selectedYear = now.getFullYear();
+      this._selectedMonth = 'all';
+
+      this._profilesData = {};
+      this._profileList = [];
+      this._currentProfileId = null;
+
+      this._availableYears = [];
+      this._availableMonths = [];
+
+      this._allProfileItems = [];
+      this._items = [];
+      this._stats = { orders: 0, items: 0, total: 0 };
+
+      this._activeTab = 'history';
+      this._searchKeyword = '';
+      this._warrantyDays = 30;
+      this._initialWarrantyChecked = false;
+
+      this._itemsPerPage = 10;
+      this._historyPage = 1;
+      this._searchPage = 1;
+      this._warrantyPage = 1;
+
+      this._entryIds = {};
+
+      this._uniqueCategories = new Set();
+      this._uniquePlaces = new Set();
+      this._uniqueManufacturers = new Set();
+
+      this._expandedOrderId = null;
+      this._itemToDelete = null;
+      this._editingOrder = null;
+
+      this._configEntriesMap = {};
+      this._entityRegistryMap = {};
+      this._isScanning = false;
+      this._trackedEntities = [];
+      this._isError = false;
+      this._errorMsg = '';
+
+      this._listenersAttached = false;
+      this._scanScheduled = null;
+      this._scanRetryCount = 0;
+      this._maxScanRetries = 4;
+
       try {
-          if (!this.shadowRoot) {
-              this.attachShadow({ mode: 'open' });
-          }
-      } catch (err) {
-          console.warn("[ShoppingHistory] attachShadow error handled:", err);
-      }
-
-      // BẢO VỆ 2: Đảm bảo toàn bộ khối khởi tạo không bị ngắt quãng
-      try {
-          this._config = {};
-          
-          const now = new Date();
-          this._selectedYear = now.getFullYear();
-          this._selectedMonth = 'all'; 
-          
-          this._profilesData = {}; 
-          this._profileList = []; 
-          this._currentProfileId = null; 
-          
-          this._availableYears = [];
-          this._availableMonths = []; 
-          
-          this._allProfileItems = []; 
-          this._items = [];
-          this._stats = { orders: 0, items: 0, total: 0 };
-          
-          this._activeTab = 'history'; 
-          this._searchKeyword = '';
-          this._warrantyDays = 30; 
-          this._initialWarrantyChecked = false; 
-
-          this._itemsPerPage = 10;
-          this._historyPage = 1;
-          this._searchPage = 1;
-          this._warrantyPage = 1;
-
-          this._entryIds = {}; 
-          
-          this._uniqueCategories = new Set();
-          this._uniquePlaces = new Set();
-          this._uniqueManufacturers = new Set();
-          
-          this._expandedOrderId = null; 
-          this._itemToDelete = null;
-          this._editingOrder = null;
-
-          this._configEntriesMap = {};
-          this._entityRegistryMap = {};
-          this._isScanning = false;
-          this._trackedEntities = []; 
-          this._isError = false;
-          this._errorMsg = '';
-
-          if (!this.card) {
-              this.card = document.createElement('ha-card');
-              this.shadowRoot.appendChild(this.card);
-              this.card.innerHTML = `
-                <div id="c-header" class="header"></div>
-                <div id="c-topbar" class="top-bar"></div>
-                <div id="c-tabs" class="tabs"></div>
-                <div id="c-content" class="tab-content-area"></div>
-                <div id="c-modal"></div>
-              `;
-              
-              this._els = {
-                  header: this.card.querySelector('#c-header'),
-                  topbar: this.card.querySelector('#c-topbar'),
-                  tabs: this.card.querySelector('#c-tabs'),
-                  content: this.card.querySelector('#c-content'),
-                  modal: this.card.querySelector('#c-modal')
-              };
-              
-              this.injectStaticCSS();
-              this.attachGlobalListeners();
-          }
+          this._ensureCardShell();
       } catch (err) {
           console.error("[ShoppingHistory] Initialization error:", err);
       }
+    }
+
+    connectedCallback() {
+      try {
+          this._ensureCardShell();
+          this.updateTheme();
+          if (this._hass) this.scheduleFullScan(0);
+      } catch (err) {
+          console.error("[ShoppingHistory] connectedCallback error:", err);
+      }
+    }
+
+    disconnectedCallback() {
+      if (this._scanScheduled) {
+          clearTimeout(this._scanScheduled);
+          this._scanScheduled = null;
+      }
+    }
+
+    _ensureCardShell() {
+      if (!this.shadowRoot) {
+          this.attachShadow({ mode: 'open' });
+      }
+
+      if (!this.card) {
+          this.card = document.createElement('ha-card');
+      }
+
+      if (this.card.parentNode !== this.shadowRoot) {
+          this.shadowRoot.appendChild(this.card);
+      }
+
+      const needsShell = !this.card.querySelector('#c-header') || !this.card.querySelector('#c-topbar') || !this.card.querySelector('#c-tabs') || !this.card.querySelector('#c-content') || !this.card.querySelector('#c-modal');
+      if (needsShell) {
+          this.card.innerHTML = `
+            <div id="c-header" class="header"></div>
+            <div id="c-topbar" class="top-bar"></div>
+            <div id="c-tabs" class="tabs"></div>
+            <div id="c-content" class="tab-content-area"></div>
+            <div id="c-modal"></div>
+          `;
+      }
+
+      this._els = {
+          header: this.card.querySelector('#c-header'),
+          topbar: this.card.querySelector('#c-topbar'),
+          tabs: this.card.querySelector('#c-tabs'),
+          content: this.card.querySelector('#c-content'),
+          modal: this.card.querySelector('#c-modal')
+      };
+
+      this.injectStaticCSS();
+
+      if (!this._listenersAttached) {
+          this.attachGlobalListeners();
+          this._listenersAttached = true;
+      }
+    }
+
+    scheduleFullScan(delay = 0, options = {}) {
+      if (this._scanScheduled) clearTimeout(this._scanScheduled);
+      this._scanScheduled = setTimeout(() => {
+          this._scanScheduled = null;
+          this.performFullScan(options);
+      }, delay);
     }
 
     setConfig(config) {
@@ -343,6 +382,7 @@
       }
       
       try {
+          this._ensureCardShell();
           this._config = config;
           this.updateTheme();
           this.renderHeaderAndTabs();
@@ -357,16 +397,17 @@
 
     set hass(hass) {
       try {
-          if (!hass || !hass.states) return; 
+          this._ensureCardShell();
+          if (!hass || !hass.states) return;
           const oldHass = this._hass;
           this._hass = hass;
 
           if (!oldHass) {
-              this.performFullScan();
+              this.scheduleFullScan(0);
               return;
           }
 
-          if (this._isScanning) return; 
+          if (this._isScanning) return;
           
           let shouldUpdate = false;
           if (this._trackedEntities && this._trackedEntities.length > 0) {
@@ -379,7 +420,7 @@
           }
 
           if (shouldUpdate) {
-              this.performFullScan();
+              this.scheduleFullScan(0);
           }
       } catch (err) {
           console.error("Shopping History: Error in set hass", err);
@@ -387,29 +428,31 @@
     }
 
     async forceReload(iconEl) {
-        if (this._isScanning) return; 
-        this._isScanning = true;
-        this._isError = false; 
-        
+        if (this._isScanning) return;
+        this._isError = false;
+
         if (iconEl) iconEl.classList.add('spin');
-        
+
         try {
             this.updateTheme();
-            await this.performFullScan();
+            this._scanRetryCount = 0;
+            await this.performFullScan({ force: true });
         } catch (err) {
             console.error("Lỗi khi tải lại dữ liệu:", err);
             this._isError = true;
             this._errorMsg = err.message || String(err);
-            this.renderHeaderAndTabs(); 
+            this.renderHeaderAndTabs();
             this.renderError();
         } finally {
             if (iconEl) iconEl.classList.remove('spin');
-            this._isScanning = false;
         }
     }
 
-    async performFullScan() {
-      if (!this._hass || !this._hass.states || this._isScanning) return;
+    async performFullScan(options = {}) {
+      const { force = false } = options;
+      this._ensureCardShell();
+      if (!this._hass || !this._hass.states) return;
+      if (this._isScanning && !force) return;
       this._isScanning = true;
       this._isError = false;
 
@@ -428,15 +471,27 @@
               console.warn("Shopping History: callWS fallback.", wsErr);
           }
 
-          const yearSensors = Object.keys(this._hass.states).filter(eid => 
-            eid.startsWith('sensor.') && 
+          const yearSensors = Object.keys(this._hass.states).filter(eid =>
+            eid.startsWith('sensor.') &&
             this._hass.states[eid] &&
-            this._hass.states[eid].attributes && 
-            this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined && 
+            this._hass.states[eid].attributes &&
+            this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined &&
             this._hass.states[eid].attributes.nam !== undefined
           );
 
           this._trackedEntities = yearSensors;
+
+          if (yearSensors.length === 0) {
+              if (this._scanRetryCount < this._maxScanRetries) {
+                  this._scanRetryCount += 1;
+                  this.scheduleFullScan(300 * this._scanRetryCount);
+              }
+              this.renderHeaderAndTabs();
+              this.renderContent();
+              return;
+          }
+
+          this._scanRetryCount = 0;
 
           this._uniqueCategories.clear();
           this._uniquePlaces.clear();
