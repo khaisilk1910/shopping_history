@@ -1,9 +1,10 @@
 (function() {
   'use strict';
 
-  const SHOPPING_HISTORY_CARD_VERSION = '2026.05.28-mobile-fix';
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.05.29-ha-optimized';
 
   // --- HÀM TIỆN ÍCH CHUNG ---
+  const esc = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const formatMoney = (val) => new Intl.NumberFormat('vi-VN').format(Math.round(val || 0));
   const formatNumber = (val) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(val || 0);
   const formatDate = (dateString) => {
@@ -62,7 +63,7 @@
           .label { font-weight: 500; color: var(--primary-text-color); font-size: 14px; min-width: 120px;}
           .input-group { display: flex; align-items: center; gap: 12px; }
           input[type=color] { cursor: pointer; border: 1px solid var(--divider-color, #e0e0e0); border-radius: 6px; padding: 2px; width: 40px; height: 32px; background: transparent; }
-          input[type=range] { flex-grow: 1; cursor: pointer; }
+          input[type=range] { flex-grow: 1; cursor: pointer; accent-color: var(--primary-color); }
           input[type=text], select.custom-input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, transparent); color: var(--primary-text-color); box-sizing: border-box; font-size: 14px;}
           .val-badge { background: var(--primary-color); color: var(--text-primary-color, white); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; min-width: 48px; text-align: center; }
           select.ha-select { background: var(--card-background-color, transparent); color: var(--primary-text-color); border: 1px solid var(--divider-color, #e0e0e0); padding: 6px 8px; border-radius: 6px; font-family: inherit; font-size: 14px; flex-grow: 1; max-width: 250px; cursor: pointer; }
@@ -251,7 +252,11 @@
       }; 
     }
 
-    getCardSize() { return 3; }
+    getCardSize() { return Math.ceil((this._config && this._config.card_height ? this._config.card_height : 600) / 50); }
+    getGridOptions() {
+      const h = this._config && this._config.card_height ? this._config.card_height : 600;
+      return { columns: 12, rows: Math.ceil(h / 50), min_columns: 4, min_rows: 8 };
+    }
 
     constructor() {
       super();
@@ -321,11 +326,13 @@
 
           if (!this._resumeHandler) {
               this._resumeHandler = () => {
-                  if (!document.hidden) this.scheduleFullScan(100, { force: true });
+                  if (!document.hidden) this.scheduleFullScan(500, { force: true });
               };
               document.addEventListener('visibilitychange', this._resumeHandler);
               window.addEventListener('focus', this._resumeHandler);
               window.addEventListener('pageshow', this._resumeHandler);
+              // Android/iOS HA Companion app resume
+              window.addEventListener('ha-appstate-changed', this._resumeHandler);
           }
 
           if (this._hass) this.scheduleFullScan(100, { force: true });
@@ -343,6 +350,7 @@
           document.removeEventListener('visibilitychange', this._resumeHandler);
           window.removeEventListener('focus', this._resumeHandler);
           window.removeEventListener('pageshow', this._resumeHandler);
+          window.removeEventListener('ha-appstate-changed', this._resumeHandler);
           this._resumeHandler = null;
       }
     }
@@ -423,7 +431,7 @@
           this._hass = hass;
 
           if (!oldHass) {
-              this.scheduleFullScan(100, { force: true });
+              this.scheduleFullScan(200, { force: true });
               return;
           }
 
@@ -443,7 +451,7 @@
           }
 
           if (shouldUpdate) {
-              this.scheduleFullScan(100);
+              this.scheduleFullScan(150);
           }
       } catch (err) {
           console.error("Shopping History: Error in set hass", err);
@@ -509,7 +517,7 @@
                   this._scanRetryCount += 1;
                   const retryDelay = Math.min(1000 * this._scanRetryCount, 5000);
                   this.renderHeaderAndTabs();
-                  this.renderLoading('Dang cho du lieu Shopping History...');
+                  this.renderLoading('Đang chờ dữ liệu Shopping History...');
                   this.scheduleFullScan(retryDelay);
               } else {
                   this.renderHeaderAndTabs();
@@ -737,6 +745,9 @@
           ::-webkit-scrollbar-track { background: transparent; }
           ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
           ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+          
+          * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+          button, [role="button"], .tab, .nav-btn, .profile-nav, .page-btn, .btn-delete, .btn-edit, .search-tab-btn, .btn-reload { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 
           .header { display: flex; align-items: center; justify-content: space-between; font-size: clamp(18px, 5vw, 22px); font-weight: 700; margin-bottom: 12px; color: var(--text-main); flex-shrink: 0;}
           .header-left { display: flex; align-items: center; gap: 12px; }
@@ -787,7 +798,7 @@
           .t-header { flex-shrink: 0; display: grid; grid-template-columns: clamp(50px, 12vw, 75px) 1fr clamp(75px, 21vw, 110px) 36px; padding: clamp(8px, 2vw, 12px); background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--glass-border); font-size: clamp(10px, 2.5vw, 12px); font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
           .t-header.search-header, .t-header.warranty-header { grid-template-columns: clamp(55px, 14vw, 80px) 1fr clamp(80px, 22vw, 110px); }
           
-          .table-wrapper { flex: 1; overflow: auto; } 
+          .table-wrapper { flex: 1; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; } 
 
           .t-row-container { border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
           .t-row-container:last-child { border-bottom: none; }
@@ -833,7 +844,7 @@
           .page-btn.disabled { opacity: 0.15; cursor: default; }
           .page-info { font-size: 11px; font-weight: 700; color: var(--text-dim); background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); }
 
-          .search-tab-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding-right: 4px;}
+          .search-tab-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding-right: 4px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
           .search-box { background: var(--block-bg); border-radius: 12px; padding: 12px; border: 1px solid var(--glass-border); flex-shrink:0; margin-bottom: 12px; }
           .s-input-group { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--glass-border); transition: 0.2s;}
           .s-input-group:focus-within { border-color: var(--accent); background: rgba(0,0,0,0.25); }
@@ -868,7 +879,7 @@
           .btn-modal-confirm { background: #ef4444; color: white; }
           .btn-modal-confirm:hover { background: #dc2626; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
 
-          .add-tab-wrapper { overflow-y: auto; flex: 1; padding-right: 4px;}
+          .add-tab-wrapper { overflow-y: auto; flex: 1; padding-right: 4px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
           form { background: var(--block-bg); border-radius: 12px; padding: 16px; border: 1px solid var(--glass-border); }
           .form-title { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
           .form-row { margin-bottom: 12px; }
@@ -1036,10 +1047,10 @@
 
         this.card.addEventListener('change', (e) => {
             if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.updateData(); }
-            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value); this.updateData(); }
+            else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value, 10); this.updateData(); }
             else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.updateData(); }
             else if (e.target.id === 'warranty-slider') {
-                this._warrantyDays = parseInt(e.target.value);
+                this._warrantyDays = parseInt(e.target.value, 10);
                 this._warrantyPage = 1;
                 this.renderSearchDynamic();
             }
@@ -1072,7 +1083,7 @@
            if(e.target.closest('#clear-search')) {
                const inp = this.card.querySelector('#search-input');
                if(inp) { inp.value = ''; this._searchKeyword = ''; }
-               e.target.remove();
+               e.target.closest('#clear-search').remove();
                this._searchPage = 1;
                this.renderSearchDynamic();
            } 
@@ -1146,6 +1157,9 @@
         this.card.style.flexDirection = 'column';
         this.card.style.overflow = "hidden";
         this.card.style.isolation = 'isolate';
+        this.card.style.contain = 'layout style';
+        this.card.style.position = 'relative';
+        this.card.style.boxSizing = 'border-box';
 
         let c_text = conf.textColor || '#f8fafc';
         let c_accent = conf.accentColor || '#0ea5e9';
@@ -1265,7 +1279,7 @@
                         <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
                         <select id="profile-select">
                             ${this._profileList.length > 0 
-                                ? this._profileList.map(p => `<option value="${p.id}" ${this._currentProfileId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')
+                                ? this._profileList.map(p => `<option value="${esc(p.id)}" ${this._currentProfileId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')
                                 : `<option value="">Chưa có dữ liệu</option>`
                             }
                         </select>
@@ -1288,13 +1302,13 @@
         }
     }
 
-    renderLoading(message = 'Dang tai du lieu...') {
+    renderLoading(message = 'Đang tải dữ liệu...') {
         if(!this._els || !this._els.content) return;
         this._els.content.innerHTML = `
             <div class="empty-state-nice fade-in">
                 <ha-icon class="spin" icon="mdi:loading"></ha-icon>
                 <div class="empty-title">${message}</div>
-                <div class="empty-sub">Neu dang mo bang ung dung mobile, the se tu quet lai khi WebView san sang.</div>
+                <div class="empty-sub">Nếu đang mở bằng ứng dụng mobile, thẻ sẽ tự quét lại khi WebView sẵn sàng.</div>
             </div>
         `;
     }
@@ -1516,18 +1530,18 @@
         const iconSave = isEdit ? `mdi:content-save-edit-outline` : `mdi:content-save-outline`;
         const eOrder = this._editingOrder || {};
 
-        const v_name = eOrder.ten_hang || '';
-        const v_place = eOrder.noi_mua || '';
-        const v_cat = eOrder.nganh_hang || '';
+        const v_name = esc(eOrder.ten_hang || '');
+        const v_place = esc(eOrder.noi_mua || '');
+        const v_cat = esc(eOrder.nganh_hang || '');
         const v_price = eOrder.don_gia || '';
         const v_qty = eOrder.so_luong || 1;
         const v_date = eOrder.ngay_mua || todayStr;
-        const v_status = eOrder.tinh_trang || 'Mới';
-        const v_model = eOrder.model || '';
-        const v_mfg = eOrder.hang_sx || '';
+        const v_status = esc(eOrder.tinh_trang || 'Mới');
+        const v_model = esc(eOrder.model || '');
+        const v_mfg = esc(eOrder.hang_sx || '');
         const v_vat = eOrder.vat_percent || 0;
         const v_war = eOrder.thoi_gian_bh_thang || 0;
-        const v_note = eOrder.ghi_chu || '';
+        const v_note = esc(eOrder.ghi_chu || '');
 
         const showDetails = isEdit ? 'block' : 'none';
         const detailIcon = isEdit ? 'mdi:chevron-up' : 'mdi:chevron-down';
@@ -1653,19 +1667,19 @@
           <div class="t-row-container">
               <div class="t-row ${isExpanded ? 'expanded' : ''}" data-id="${item.id}">
                 <div class="col-date" style="${isSearchMode ? 'font-size: 10px;' : ''}">
-                  <div>${dateStr}</div>
+                  <div>${esc(dateStr)}</div>
                   <div class="d-id">ID: ${item.id}</div>
                 </div>
                 <div class="col-info">
-                  <div class="info-name">${item.ten_hang}</div>
+                  <div class="info-name">${esc(item.ten_hang)}</div>
                   <div class="info-sub">
-                      ${item.thoi_gian_bh_thang ? item.thoi_gian_bh_thang + ' tháng' : 'Không BH'} | 
-                      <span class="warranty-date ${bhStatus.class}">${bhStatus.text}</span>
+                      ${item.thoi_gian_bh_thang ? esc(item.thoi_gian_bh_thang) + ' tháng' : 'Không BH'} | 
+                      <span class="warranty-date ${bhStatus.class}">${esc(bhStatus.text)}</span>
                   </div>
                 </div>
                 <div class="col-price">
                   <div class="price-val">${formatMoney(item.thanh_tien_sau_vat)}</div>
-                  <div class="price-qty">SL: ${item.so_luong}</div>
+                  <div class="price-qty">SL: ${formatNumber(item.so_luong)}</div>
                 </div>
                 ${!isSearchMode ? `
                 <div class="col-action">
@@ -1676,13 +1690,13 @@
               
               <div class="row-details slide-down" style="display: ${isExpanded ? 'block' : 'none'};">
                  <div class="detail-grid">
-                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${item.noi_mua || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${item.nganh_hang || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${item.tinh_trang || 'Mới'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${item.hang_sx || '--'}</span></div>
-                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${item.model || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Nơi mua:</span> <span class="d-val">${esc(item.noi_mua) || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Ngành hàng:</span> <span class="d-val">${esc(item.nganh_hang) || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Tình trạng:</span> <span class="d-val">${esc(item.tinh_trang) || 'Mới'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Hãng SX:</span> <span class="d-val">${esc(item.hang_sx) || '--'}</span></div>
+                    <div class="d-item"><span class="d-lbl">Model:</span> <span class="d-val">${esc(item.model) || '--'}</span></div>
                     <div class="d-item"><span class="d-lbl">VAT:</span> <span class="d-val">${item.vat_percent || 0}%</span></div>
-                    <div class="d-item" style="grid-column: 1 / -1; margin-top: 4px;"><span class="d-lbl">Ghi chú:</span> <span class="d-val" style="white-space: normal; line-height: 1.4;">${item.ghi_chu || '--'}</span></div>
+                    <div class="d-item" style="grid-column: 1 / -1; margin-top: 4px;"><span class="d-lbl">Ghi chú:</span> <span class="d-val" style="white-space: normal; line-height: 1.4;">${esc(item.ghi_chu) || '--'}</span></div>
                  </div>
               </div>
           </div>
@@ -1806,8 +1820,9 @@
       window.customCards.push({
         type: 'shopping-history-card',
         name: "Lịch Sử Mua Sắm",
-        description: "Shopping history card",
+        description: "Quản lý & theo dõi lịch sử mua sắm với bảo hành và thống kê chi tiêu.",
         preview: true,
+        documentationURL: "https://github.com/home-assistant/",
       });
     }
 
