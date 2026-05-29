@@ -1,6 +1,8 @@
 (function() {
   'use strict';
 
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.05.28-mobile-fix';
+
   // --- HÀM TIỆN ÍCH CHUNG ---
   const formatMoney = (val) => new Intl.NumberFormat('vi-VN').format(Math.round(val || 0));
   const formatNumber = (val) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(val || 0);
@@ -301,7 +303,9 @@
       this._listenersAttached = false;
       this._scanScheduled = null;
       this._scanRetryCount = 0;
-      this._maxScanRetries = 4;
+      this._maxScanRetries = 40;
+      this._scanAgainAfterCurrent = false;
+      this._resumeHandler = null;
 
       try {
           this._ensureCardShell();
@@ -314,7 +318,17 @@
       try {
           this._ensureCardShell();
           this.updateTheme();
-          if (this._hass) this.scheduleFullScan(0);
+
+          if (!this._resumeHandler) {
+              this._resumeHandler = () => {
+                  if (!document.hidden) this.scheduleFullScan(100, { force: true });
+              };
+              document.addEventListener('visibilitychange', this._resumeHandler);
+              window.addEventListener('focus', this._resumeHandler);
+              window.addEventListener('pageshow', this._resumeHandler);
+          }
+
+          if (this._hass) this.scheduleFullScan(100, { force: true });
       } catch (err) {
           console.error("[ShoppingHistory] connectedCallback error:", err);
       }
@@ -324,6 +338,12 @@
       if (this._scanScheduled) {
           clearTimeout(this._scanScheduled);
           this._scanScheduled = null;
+      }
+      if (this._resumeHandler) {
+          document.removeEventListener('visibilitychange', this._resumeHandler);
+          window.removeEventListener('focus', this._resumeHandler);
+          window.removeEventListener('pageshow', this._resumeHandler);
+          this._resumeHandler = null;
       }
     }
 
@@ -386,7 +406,7 @@
           this._config = config;
           this.updateTheme();
           this.renderHeaderAndTabs();
-          if (this._hass) this.updateData();
+          if (this._hass) this.scheduleFullScan(100, { force: true });
       } catch (err) {
           console.error("Shopping History: Error in setConfig", err);
           this._isError = true;
@@ -403,14 +423,17 @@
           this._hass = hass;
 
           if (!oldHass) {
-              this.scheduleFullScan(0);
+              this.scheduleFullScan(100, { force: true });
               return;
           }
 
-          if (this._isScanning) return;
+          if (this._isScanning) {
+              this._scanAgainAfterCurrent = true;
+              return;
+          }
           
-          let shouldUpdate = false;
-          if (this._trackedEntities && this._trackedEntities.length > 0) {
+          let shouldUpdate = !this._trackedEntities || this._trackedEntities.length === 0 || !this._currentProfileId;
+          if (!shouldUpdate && this._trackedEntities && this._trackedEntities.length > 0) {
               for (let eid of this._trackedEntities) {
                   if (oldHass.states[eid] !== hass.states[eid]) {
                       shouldUpdate = true;
@@ -420,7 +443,7 @@
           }
 
           if (shouldUpdate) {
-              this.scheduleFullScan(0);
+              this.scheduleFullScan(100);
           }
       } catch (err) {
           console.error("Shopping History: Error in set hass", err);
@@ -484,10 +507,14 @@
           if (yearSensors.length === 0) {
               if (this._scanRetryCount < this._maxScanRetries) {
                   this._scanRetryCount += 1;
-                  this.scheduleFullScan(300 * this._scanRetryCount);
+                  const retryDelay = Math.min(1000 * this._scanRetryCount, 5000);
+                  this.renderHeaderAndTabs();
+                  this.renderLoading('Dang cho du lieu Shopping History...');
+                  this.scheduleFullScan(retryDelay);
+              } else {
+                  this.renderHeaderAndTabs();
+                  this.renderContent();
               }
-              this.renderHeaderAndTabs();
-              this.renderContent();
               return;
           }
 
@@ -602,6 +629,10 @@
           this.renderError();
       } finally {
           this._isScanning = false;
+          if (this._scanAgainAfterCurrent) {
+              this._scanAgainAfterCurrent = false;
+              this.scheduleFullScan(100);
+          }
       }
     }
 
@@ -1257,6 +1288,17 @@
         }
     }
 
+    renderLoading(message = 'Dang tai du lieu...') {
+        if(!this._els || !this._els.content) return;
+        this._els.content.innerHTML = `
+            <div class="empty-state-nice fade-in">
+                <ha-icon class="spin" icon="mdi:loading"></ha-icon>
+                <div class="empty-title">${message}</div>
+                <div class="empty-sub">Neu dang mo bang ung dung mobile, the se tu quet lai khi WebView san sang.</div>
+            </div>
+        `;
+    }
+
     renderError() {
         if(!this._els || !this._els.content) return;
         this._els.content.innerHTML = `
@@ -1769,7 +1811,7 @@
       });
     }
 
-    console.info('[SHOPPING-HISTORY-CARD] Init done');
+    console.info('[SHOPPING-HISTORY-CARD] Init done', SHOPPING_HISTORY_CARD_VERSION);
 
   } catch (err) {
     console.error('[SHOPPING-HISTORY-CARD] Init error:', err);
