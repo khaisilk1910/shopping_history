@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  const SHOPPING_HISTORY_CARD_VERSION = '2026.06.01-ha-mobile-network-optimized';
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.06.01-ha-mobile-network-stable-render';
 
   // --- HÀM TIỆN ÍCH CHUNG ---
   const esc = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -315,6 +315,11 @@
       this._networkRecoveryTimers = [];
       this._wsTimeoutMs = 6000;
       this._serviceTimeoutMs = 15000;
+      this._lastChromeSignature = '';
+      this._lastContentSignature = '';
+      this._lastLoadingSignature = '';
+      this._hasRenderedContent = false;
+      this._hasRealData = false;
 
       try {
           this._ensureCardShell();
@@ -344,7 +349,7 @@
               window.addEventListener('connection-changed', this._resumeHandler);
           }
 
-          if (this._hass) this.scheduleFullScan(100, { force: true, reason: 'connected' });
+          if (this._hass && !this._hasRealData) this.scheduleFullScan(250, { force: true, reason: 'connected' });
       } catch (err) {
           console.error("[ShoppingHistory] connectedCallback error:", err);
       }
@@ -409,13 +414,16 @@
     }
 
     scheduleFullScan(delay = 0, options = {}) {
+      // Debounce các lần quét liên tiếp khi Lovelace/Companion App vừa mở trang.
+      // Vẫn cho phép force để phục hồi mạng, nhưng gom request gần nhau để tránh render bảng lặp gây nháy.
       if (this._scanScheduled) clearTimeout(this._scanScheduled);
+      const normalizedDelay = Math.max(0, Number(delay) || 0);
       this._scanScheduled = setTimeout(() => {
           this._scanScheduled = null;
           this.performFullScan(options).catch(err => {
               console.error("Shopping History: scheduled scan failed", err);
           });
-      }, delay);
+      }, normalizedDelay);
     }
 
     clearNetworkRecoveryTimers() {
@@ -427,7 +435,8 @@
     scheduleNetworkRecovery(reason = 'network-resume') {
       this.clearNetworkRecoveryTimers();
       this._scanRetryCount = 0;
-      const delays = [0, 750, 2500, 6000];
+      // Các nhịp sau vẫn giữ để phục hồi khi đổi Wi-Fi/VPN, nhưng render ổn định sẽ bỏ qua nếu dữ liệu không đổi.
+      const delays = [250, 1500, 4500];
       this._networkRecoveryTimers = delays.map(delay => setTimeout(() => {
           this.scheduleFullScan(0, { force: true, reason });
       }, delay));
@@ -500,7 +509,7 @@
           this._hass = hass;
 
           if (!oldHass) {
-              this.scheduleFullScan(200, { force: true, reason: 'first-hass' });
+              this.scheduleFullScan(250, { force: true, reason: 'first-hass' });
               return;
           }
 
@@ -614,8 +623,12 @@
                   this._scanRetryCount += 1;
                   const retryDelay = Math.min(1000 * this._scanRetryCount, 5000);
                   this.renderHeaderAndTabs();
-                  this.renderLoading('Đang chờ dữ liệu Shopping History...');
-                  this.scheduleFullScan(retryDelay);
+                  // Nếu đã có bảng cũ, giữ nguyên màn hình hiện tại trong lúc mạng/WebSocket đang ổn định lại.
+                  // Việc này tránh nháy từ bảng -> loading -> bảng khi mở trang hoặc đổi mạng.
+                  if (!this._hasRenderedContent) {
+                      this.renderLoading('Đang chờ dữ liệu Shopping History...');
+                  }
+                  this.scheduleFullScan(retryDelay, { reason: 'wait-data' });
               } else {
                   this.renderHeaderAndTabs();
                   this.renderContent();
@@ -624,6 +637,7 @@
           }
 
           this._scanRetryCount = 0;
+          this._hasRealData = true;
 
           this._uniqueCategories.clear();
           this._uniquePlaces.clear();
@@ -1347,11 +1361,91 @@
         this.card.style.setProperty('--glass-border', hexToRgba(conf.border_color || '#ffffff', (conf.border_opacity || 10) / 2));
     }
 
-    renderHeaderAndTabs() {
+    getChromeSignature(title, configIcon) {
+        const profileSig = (this._profileList || []).map(p => `${p.id}:${p.name}`).join('|');
+        return [
+            title,
+            configIcon,
+            this._isError ? 'error' : 'ok',
+            this._activeTab,
+            this._currentProfileId || '',
+            profileSig
+        ].join('||');
+    }
+
+    stableItemSignature(item) {
+        if (!item || typeof item !== 'object') return String(item || '');
+        // Những trường đang ảnh hưởng trực tiếp đến bảng, thống kê, tìm kiếm, bảo hành và form sửa.
+        return [
+            item.id,
+            item.ngay_mua,
+            item.thang,
+            item.ten_hang,
+            item.noi_mua,
+            item.nganh_hang,
+            item.model,
+            item.hang_sx,
+            item.tinh_trang,
+            item.so_luong,
+            item.don_gia,
+            item.vat_percent,
+            item.thanh_tien_sau_vat,
+            item.ngay_het_bh,
+            item.thoi_gian_bh_thang,
+            item.ghi_chu
+        ].map(v => v === undefined || v === null ? '' : String(v)).join('~');
+    }
+
+    stableItemsSignature(items) {
+        if (!Array.isArray(items) || items.length === 0) return '0';
+        return `${items.length}:${items.map(item => this.stableItemSignature(item)).join('|')}`;
+    }
+
+    getContentSignature() {
+        const editingSig = this._editingOrder ? this.stableItemSignature(this._editingOrder) : '';
+        const categoriesSig = Array.from(this._uniqueCategories || []).sort().join('|');
+        const placesSig = Array.from(this._uniquePlaces || []).sort().join('|');
+        const manufacturersSig = Array.from(this._uniqueManufacturers || []).sort().join('|');
+        return [
+            this._activeTab,
+            this._currentProfileId || '',
+            this._selectedYear || '',
+            this._selectedMonth || '',
+            (this._availableYears || []).join(','),
+            (this._availableMonths || []).join(','),
+            JSON.stringify(this._stats || {}),
+            this._historyPage,
+            this._searchPage,
+            this._warrantyPage,
+            this._searchKeyword,
+            this._warrantyDays,
+            this._expandedOrderId || '',
+            editingSig,
+            categoriesSig,
+            placesSig,
+            manufacturersSig,
+            this.stableItemsSignature(this._items),
+            this.stableItemsSignature(this._allProfileItems)
+        ].join('||');
+    }
+
+    refreshSearchSliderBackground() {
+        if (!this.card) return;
+        const wSlider = this.card.querySelector('#warranty-slider');
+        if(wSlider) {
+            const percent = (wSlider.value / 365) * 100;
+            wSlider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${percent}%, rgba(255,255,255,0.1) ${percent}%, rgba(255,255,255,0.1) 100%)`;
+        }
+    }
+
+    renderHeaderAndTabs(force = false) {
         if(!this._els || !this._els.header) return;
         const conf = this._config || {};
         const title = conf.title || "Quản Lý Mua Sắm";
         const configIcon = conf.icon || "mdi:cart-outline";
+        const chromeSignature = this.getChromeSignature(title, configIcon);
+        if (!force && chromeSignature === this._lastChromeSignature) return;
+        this._lastChromeSignature = chromeSignature;
         const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
 
         this._els.header.innerHTML = `
@@ -1404,6 +1498,9 @@
 
     renderLoading(message = 'Đang tải dữ liệu...') {
         if(!this._els || !this._els.content) return;
+        const loadingSignature = `loading:${message}`;
+        if (loadingSignature === this._lastLoadingSignature && this._els.content.innerHTML) return;
+        this._lastLoadingSignature = loadingSignature;
         this._els.content.innerHTML = `
             <div class="empty-state-nice fade-in">
                 <ha-icon class="spin" icon="mdi:loading"></ha-icon>
@@ -1415,6 +1512,8 @@
 
     renderError() {
         if(!this._els || !this._els.content) return;
+        this._lastContentSignature = '';
+        this._lastLoadingSignature = '';
         this._els.content.innerHTML = `
             <div class="error-state fade-in">
                 <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
@@ -1432,24 +1531,30 @@
       this._historyPage = 1;
       this._searchPage = 1;
       this._warrantyPage = 1;
-      this.renderHeaderAndTabs();
-      this.renderContent();
+      this.renderHeaderAndTabs(true);
+      this.renderContent(true);
     }
 
-    renderContent() {
+    renderContent(force = false) {
       if(!this._els || !this._els.content || this._isError) return;
+      const contentSignature = this.getContentSignature();
+      if (!force && this._hasRenderedContent && contentSignature === this._lastContentSignature) {
+          this.refreshSearchSliderBackground();
+          return;
+      }
+
       if (this._activeTab === 'history') {
           this._els.content.innerHTML = this.getHistoryHTML();
       } else if (this._activeTab === 'search') {
           this._els.content.innerHTML = this.getSearchHTML();
-          const wSlider = this.card.querySelector('#warranty-slider');
-          if(wSlider) {
-              const percent = (wSlider.value / 365) * 100;
-              wSlider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${percent}%, rgba(255,255,255,0.1) ${percent}%, rgba(255,255,255,0.1) 100%)`;
-          }
+          this.refreshSearchSliderBackground();
       } else if (this._activeTab === 'add') {
           this._els.content.innerHTML = this.getAddHTML();
       }
+
+      this._lastContentSignature = contentSignature;
+      this._lastLoadingSignature = '';
+      this._hasRenderedContent = true;
     }
 
     getHistoryHTML() {
