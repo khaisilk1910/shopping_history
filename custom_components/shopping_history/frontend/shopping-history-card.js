@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  const SHOPPING_HISTORY_CARD_VERSION = '2026.06.01-ha-mobile-network-stable-render';
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.06.01-default-profile-ui-short-name';
 
   // --- HÀM TIỆN ÍCH CHUNG ---
   const esc = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -45,7 +45,124 @@
       if (!this._rendered) {
         this.render();
         this._rendered = true;
+      } else {
+        this.refreshDefaultProfileOptions();
       }
+    }
+
+    cleanEditorProfileDisplayName(value, fallback = '') {
+      let text = String(value || '').trim();
+      const backup = String(fallback || value || '').trim();
+
+      // Bỏ config_entry_id / mã tích hợp ở đầu chuỗi, ví dụ:
+      // "01KN... Lịch Sử Mua Sắm Nhung" -> "Lịch Sử Mua Sắm Nhung".
+      text = text.replace(/^[A-Za-z0-9_-]{12,}\s+/, '').trim();
+
+      // Bỏ hậu tố năm nếu friendly_name là sensor theo năm.
+      text = text.replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}\s*$/i, '').trim();
+
+      // Bỏ tên tích hợp/card, chỉ giữ phần tên profile người dùng đặt.
+      text = text.replace(/^(?:shopping\s*history|lich\s*su\s*mua\s*sam|quan\s*ly\s*mua\s*sam|lịch\s*sử\s*mua\s*sắm|quản\s*lý\s*mua\s*sắm)\s*[:\-–_]*\s*/i, '').trim();
+
+      return text || backup || 'Profile';
+    }
+
+    getAvailableProfilesForEditor() {
+      const states = this._hass && this._hass.states ? this._hass.states : {};
+      const tempGroups = {};
+
+      Object.keys(states).forEach(eid => {
+        const state = states[eid];
+        const attrs = state && state.attributes ? state.attributes : {};
+        if (!eid.startsWith('sensor.') || attrs.danh_sach_chi_tiet === undefined || attrs.nam === undefined) return;
+
+        let groupId = (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) || attrs.config_entry_id;
+        if (!groupId) {
+          const baseName = attrs.friendly_name || eid;
+          groupId = String(baseName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+        }
+        if (!groupId) groupId = eid;
+
+        let profileName = attrs.friendly_name || groupId;
+        profileName = String(profileName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
+
+        if (!tempGroups[groupId]) tempGroups[groupId] = { id: groupId, displayNames: [] };
+        tempGroups[groupId].displayNames.push(profileName || groupId);
+      });
+
+      const profiles = [];
+      Object.keys(tempGroups).forEach(groupId => {
+        const group = tempGroups[groupId];
+        const nameCounts = group.displayNames.reduce((acc, name) => {
+          acc[name] = (acc[name] || 0) + 1;
+          return acc;
+        }, {});
+        let finalName = group.displayNames.length > 0
+          ? Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b)
+          : groupId;
+
+        const shortName = this.cleanEditorProfileDisplayName(finalName, groupId);
+        let counter = 1;
+        let uniqueName = shortName;
+        while (profiles.some(p => p.name === uniqueName)) {
+          uniqueName = `${shortName} (${counter})`;
+          counter++;
+        }
+        profiles.push({
+          id: groupId,
+          name: uniqueName,
+          aliases: Array.from(new Set([groupId, uniqueName, shortName, finalName, ...group.displayNames].filter(Boolean)))
+        });
+      });
+
+      return profiles.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    getDefaultProfileOptionsHTML() {
+      const selectedId = this._default_profile_id;
+      const profiles = this.getAvailableProfilesForEditor();
+      const seen = new Set();
+      const options = [`<option value="">Tự động (profile đầu tiên)</option>`];
+
+      profiles.forEach(profile => {
+        if (!profile || !profile.id || seen.has(profile.id)) return;
+        seen.add(profile.id);
+        const displayName = this.cleanEditorProfileDisplayName(profile.name || profile.id, profile.id);
+        options.push(`<option value="${esc(profile.id)}" data-profile-name="${esc(displayName)}">${esc(displayName)}</option>`);
+      });
+
+      if (selectedId && !seen.has(selectedId)) {
+        const savedName = this.cleanEditorProfileDisplayName(this._default_profile_name || selectedId, selectedId);
+        options.push(`<option value="${esc(selectedId)}" data-profile-name="${esc(savedName)}">Đang chọn: ${esc(savedName)}</option>`);
+      }
+
+      return options.join('');
+    }
+
+    refreshDefaultProfileOptions() {
+      const select = this.querySelector('#default_profile_id');
+      if (!select) return;
+      const currentValue = this._default_profile_id;
+      select.innerHTML = this.getDefaultProfileOptionsHTML();
+      select.value = currentValue;
+      if (currentValue && select.value !== currentValue && this._default_profile_name) {
+        const fallbackOption = Array.from(select.options).find(opt => this.normalizeEditorProfileKey(opt.textContent) === this.normalizeEditorProfileKey(this._default_profile_name));
+        if (fallbackOption) select.value = fallbackOption.value;
+      }
+    }
+
+    normalizeEditorProfileKey(value) {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s*(?:nam|year|-|_)?\s*\d{4}\s*$/i, '')
+        .replace(/^(?:shopping history|lich su mua sam|quan ly mua sam)\s+/i, '')
+        .replace(/\s*\(\d+\)\s*$/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
 
     render() {
@@ -84,7 +201,7 @@
         </style>
 
         <div class="editor-container">
-          <div class="section"><div class="section-title no-collapse"><div class="title-left">⚙️ Cài đặt chung</div></div><div class="section-content"><div class="row-col"><span class="label">Tiêu đề thẻ</span><input type="text" id="title-input" class="custom-input config-trigger" value="${currentTitle}"></div><div class="row-col"><span class="label">Icon</span><input type="text" id="icon-input" class="custom-input config-trigger" value="${currentIcon}"></div><div class="row"><span class="label">Chiều cao thẻ (px)</span><input type="range" id="card_height" class="config-trigger" min="600" max="1000" step="50"><span class="val-badge" id="card_height_val"></span></div></div></div>
+          <div class="section"><div class="section-title no-collapse"><div class="title-left">⚙️ Cài đặt chung</div></div><div class="section-content"><div class="row-col"><span class="label">Tiêu đề thẻ</span><input type="text" id="title-input" class="custom-input config-trigger" value="${currentTitle}"></div><div class="row-col"><span class="label">Icon</span><input type="text" id="icon-input" class="custom-input config-trigger" value="${currentIcon}"></div><div class="row-col"><span class="label">Profile mặc định khi mở thẻ</span><select id="default_profile_id" class="custom-input config-trigger">${this.getDefaultProfileOptionsHTML()}</select><span style="font-size:12px; opacity:0.7; line-height:1.4;">Chọn profile sẽ hiển thị tự động khi thẻ được mở lần đầu.</span></div><div class="row"><span class="label">Chiều cao thẻ (px)</span><input type="range" id="card_height" class="config-trigger" min="600" max="1000" step="50"><span class="val-badge" id="card_height_val"></span></div></div></div>
           <div class="section"><div class="section-title"><div class="title-left">🎨 Nền (Background)</div><span class="section-icon">▼</span></div><div class="section-content"><div class="row"><span class="label">Loại nền</span><select id="bg_type" class="ha-select config-trigger"><option value="solid">Màu đơn sắc (Solid)</option><option value="gradient">Màu dải (Gradient)</option></select></div><div class="row"><span class="label">Độ trong suốt (%)</span><input type="range" id="bg_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="bg_opacity_val"></span></div><div id="solid_settings" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;"><div class="row"><span class="label">Màu nền</span><div class="input-group"><input type="color" id="bg_color" class="config-trigger"><span class="val-badge" id="bg_color_val"></span></div></div></div><div id="gradient_settings" style="display:none;"><div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;"><span class="label">Mẫu Gradient</span><select id="bg_gradient_preset" class="ha-select config-trigger"><option value="linear-gradient(135deg, #f0f4f8, #d9e2ec)">☀️ Sáng mặc định</option><option value="linear-gradient(135deg, #1e293b, #0f172a)">🌙 Tối mặc định</option><option value="linear-gradient(135deg, #141e30, #243b55)">🌌 Royal Night</option><option value="linear-gradient(135deg, #0f2027, #203a43, #2c5364)">🌊 Deep Ocean</option><option value="linear-gradient(135deg, #232526, #414345)">🏙️ Midnight City</option><option value="custom">✍️ Tùy chỉnh (Custom)</option></select></div><div id="custom_gradient_row" style="display:none; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--divider-color, #e0e0e0);"><div class="row" style="width:100%;"><span class="label">Màu 1</span><div class="input-group"><input type="color" id="bg_gradient_color1" class="config-trigger"><span class="val-badge" id="bg_gradient_color1_val"></span></div></div><div class="row" style="width:100%;"><span class="label">Màu 2</span><div class="input-group"><input type="color" id="bg_gradient_color2" class="config-trigger"><span class="val-badge" id="bg_gradient_color2_val"></span></div></div><div class="row" style="width:100%;"><span class="label">Góc độ (°)</span><input type="range" id="bg_gradient_angle" class="config-trigger" min="0" max="360" step="1"><span class="val-badge" id="bg_gradient_angle_val"></span></div></div></div></div></div>
           <div class="section collapsed"><div class="section-title"><div class="title-left">🖋️ Nội dung & Màu sắc</div><div class="title-right"><input type="checkbox" id="auto_contrast" class="config-trigger" title="Tự động tương phản"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="custom_colors_settings"><div class="row"><span class="label">Màu chữ</span><div class="input-group"><input type="color" id="textColor" class="config-trigger"><span class="val-badge" id="textColor_val"></span></div></div><div class="row"><span class="label">Màu Nhấn</span><div class="input-group"><input type="color" id="accentColor" class="config-trigger"><span class="val-badge" id="accentColor_val"></span></div></div><div class="row"><span class="label">Màu Tiền</span><div class="input-group"><input type="color" id="moneyColor" class="config-trigger"><span class="val-badge" id="moneyColor_val"></span></div></div><div class="row"><span class="label">Màu Nền khối</span><div class="input-group"><input type="color" id="blockBg" class="config-trigger"><span class="val-badge" id="blockBg_val"></span></div></div></div></div></div>
           <div class="section collapsed"><div class="section-title"><div class="title-left">🔲 Viền (Border)</div><div class="title-right"><input type="checkbox" id="border_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="border_settings"><div class="row"><span class="label">Màu viền</span><div class="input-group"><input type="color" id="border_color" class="config-trigger"><span class="val-badge" id="border_color_val"></span></div></div><div class="row"><span class="label">Độ dày (px)</span><input type="range" id="border_width" class="config-trigger" min="0" max="10" step="1"><span class="val-badge" id="border_width_val"></span></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="border_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="border_opacity_val"></span></div></div></div></div>
@@ -96,6 +213,8 @@
       this.addListeners();
     }
 
+    get _default_profile_id() { return (this._config && this._config.default_profile_id) ? String(this._config.default_profile_id) : ''; }
+    get _default_profile_name() { return (this._config && this._config.default_profile_name) ? String(this._config.default_profile_name) : ''; }
     get _card_height() { return (this._config && this._config.card_height !== undefined) ? this._config.card_height : 600; }
     get _bg_type() { return (this._config && this._config.bg_type) ? this._config.bg_type : 'gradient'; }
     get _bg_color() { return (this._config && this._config.bg_color) ? this._config.bg_color : '#1e293b'; }
@@ -122,6 +241,15 @@
 
     updateUI() {
       if (!this.querySelector('#bg_type')) return;
+      this.refreshDefaultProfileOptions();
+      const defaultProfileSelect = this.querySelector('#default_profile_id');
+      if (defaultProfileSelect) {
+        defaultProfileSelect.value = this._default_profile_id;
+        if (this._default_profile_id && defaultProfileSelect.value !== this._default_profile_id && this._default_profile_name) {
+          const fallbackOption = Array.from(defaultProfileSelect.options).find(opt => this.normalizeEditorProfileKey(opt.textContent) === this.normalizeEditorProfileKey(this._default_profile_name));
+          if (fallbackOption) defaultProfileSelect.value = fallbackOption.value;
+        }
+      }
       this.querySelector('#card_height').value = this._card_height;
       if(this.querySelector('#card_height_val')) this.querySelector('#card_height_val').textContent = this._card_height + 'px';
       this.querySelector('#bg_type').value = this._bg_type;
@@ -189,10 +317,16 @@
 
     addListeners() {
       const dispatchUpdate = () => {
+        const defaultProfileSelect = this.querySelector('#default_profile_id');
+        const defaultProfileOption = defaultProfileSelect && defaultProfileSelect.selectedOptions && defaultProfileSelect.selectedOptions.length
+          ? defaultProfileSelect.selectedOptions[0]
+          : null;
         let newConfig = { 
             ...this._config,
             title: this.querySelector('#title-input').value,
             icon: this.querySelector('#icon-input').value,
+            default_profile_id: defaultProfileSelect ? defaultProfileSelect.value : '',
+            default_profile_name: defaultProfileSelect && defaultProfileSelect.value ? (defaultProfileOption ? (defaultProfileOption.dataset.profileName || defaultProfileOption.textContent || '') : '') : '',
             card_height: parseInt(this.querySelector('#card_height').value, 10),
             bg_type: this.querySelector('#bg_type').value,
             bg_color: this.querySelector('#bg_color').value,
@@ -243,6 +377,8 @@
       return { 
         title: "Quản Lý Mua Sắm", 
         icon: "mdi:cart-outline", 
+        default_profile_id: '',
+        default_profile_name: '',
         card_height: 600,
         bg_opacity: 70, 
         bg_gradient_preset: 'linear-gradient(135deg, #2b5876, #4e4376)',
@@ -270,6 +406,9 @@
       this._profilesData = {};
       this._profileList = [];
       this._currentProfileId = null;
+      this._hasAppliedDefaultProfile = false;
+      this._manualProfileSelection = false;
+      this._lastDefaultProfileConfig = '';
 
       this._availableYears = [];
       this._availableMonths = [];
@@ -481,6 +620,147 @@
       return this.withTimeout(this._hass.callService(domain, service, data), timeoutMs, `callService:${domain}.${service}`);
     }
 
+    getConfiguredDefaultProfileValue() {
+      return this._config && this._config.default_profile_id !== undefined
+        ? String(this._config.default_profile_id || '').trim()
+        : '';
+    }
+
+    getConfiguredDefaultProfileName() {
+      return this._config && this._config.default_profile_name !== undefined
+        ? String(this._config.default_profile_name || '').trim()
+        : '';
+    }
+
+    getConfiguredDefaultProfileSignature() {
+      return `${this.getConfiguredDefaultProfileValue()}||${this.getConfiguredDefaultProfileName()}`;
+    }
+
+    normalizeProfileKey(value) {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s*(?:nam|year|-|_)?\s*\d{4}\s*$/i, '')
+        .replace(/^(?:shopping history|lich su mua sam|quan ly mua sam)\s+/i, '')
+        .replace(/\s*\(\d+\)\s*$/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    profileCandidateValues(profile) {
+      if (!profile) return [];
+      const values = [profile.id, profile.name];
+      if (Array.isArray(profile.aliases)) values.push(...profile.aliases);
+      return Array.from(new Set(values.filter(v => v !== undefined && v !== null).map(v => String(v).trim()).filter(Boolean)));
+    }
+
+    profileMatchesCandidate(profile, candidate) {
+      const raw = String(candidate || '').trim();
+      if (!raw || !profile) return false;
+      if (this._profilesData && this._profilesData[raw] && this._profilesData[raw].id === profile.id) return true;
+
+      const aliases = this.profileCandidateValues(profile);
+      if (aliases.some(alias => alias === raw)) return true;
+
+      const normalizedRaw = this.normalizeProfileKey(raw);
+      if (!normalizedRaw) return false;
+      const normalizedAliases = aliases.map(alias => this.normalizeProfileKey(alias)).filter(Boolean);
+      if (normalizedAliases.some(alias => alias === normalizedRaw)) return true;
+
+      if (normalizedRaw.length >= 3) {
+        return normalizedAliases.some(alias => alias.length >= 3 && (
+          alias.endsWith(` ${normalizedRaw}`) ||
+          normalizedRaw.endsWith(` ${alias}`) ||
+          alias.includes(normalizedRaw) ||
+          normalizedRaw.includes(alias)
+        ));
+      }
+      return false;
+    }
+
+    resolveDefaultProfileId(rawValue) {
+      const candidates = [
+        rawValue !== undefined ? rawValue : this.getConfiguredDefaultProfileValue(),
+        this.getConfiguredDefaultProfileName()
+      ].map(v => String(v || '').trim()).filter(Boolean);
+
+      if (candidates.length === 0) return null;
+      const profileList = this._profileList || [];
+      for (const candidate of candidates) {
+        if (this._profilesData && this._profilesData[candidate]) return candidate;
+        const match = profileList.find(profile => this.profileMatchesCandidate(profile, candidate));
+        if (match) return match.id;
+      }
+      return null;
+    }
+
+    refreshAvailableYearsForCurrentProfile() {
+      if (this._currentProfileId && this._profilesData && this._profilesData[this._currentProfileId]) {
+          this._availableYears = Array.from(this._profilesData[this._currentProfileId].years).sort((a, b) => b - a);
+          if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
+              this._selectedYear = this._availableYears[0];
+              this._selectedMonth = 'all';
+          }
+      } else {
+          this._availableYears = [];
+      }
+    }
+
+    setCurrentProfileId(profileId, options = {}) {
+      if (!profileId || !this._profilesData || !this._profilesData[profileId]) return false;
+      const changed = this._currentProfileId !== profileId;
+      this._currentProfileId = profileId;
+      if (options.manual === true) this._manualProfileSelection = true;
+      if (changed || options.resetView === true) {
+          this._selectedMonth = 'all';
+          this._historyPage = 1;
+          this._searchPage = 1;
+          this._warrantyPage = 1;
+          this._expandedOrderId = null;
+      }
+      this.refreshAvailableYearsForCurrentProfile();
+      return changed;
+    }
+
+    applyDefaultProfileSelection(options = {}) {
+      const force = options.force === true;
+      const rawDefault = this.getConfiguredDefaultProfileValue();
+      const defaultSignature = this.getConfiguredDefaultProfileSignature();
+      const defaultChanged = defaultSignature !== this._lastDefaultProfileConfig;
+      if (defaultChanged) {
+          this._lastDefaultProfileConfig = defaultSignature;
+          this._manualProfileSelection = false;
+          this._hasAppliedDefaultProfile = false;
+      }
+
+      const defaultProfileId = this.resolveDefaultProfileId(rawDefault);
+      const currentIsValid = !!(this._currentProfileId && this._profilesData && this._profilesData[this._currentProfileId]);
+
+      if (defaultProfileId && (force || defaultChanged || !this._hasAppliedDefaultProfile || !this._manualProfileSelection || !currentIsValid)) {
+          this.setCurrentProfileId(defaultProfileId, { resetView: true });
+          this._hasAppliedDefaultProfile = true;
+          return true;
+      }
+
+      if (!currentIsValid) {
+          if (this._profileList.length > 0) {
+              this.setCurrentProfileId(this._profileList[0].id, { resetView: true });
+          } else {
+              this._currentProfileId = null;
+              this._availableYears = [];
+          }
+          this._selectedMonth = 'all';
+          this._hasAppliedDefaultProfile = !!defaultProfileId;
+          return true;
+      }
+
+      this.refreshAvailableYearsForCurrentProfile();
+      return false;
+    }
+
     setConfig(config) {
       // BẢO VỆ 3: Ném lỗi chuẩn để HA biết cấu hình sai thay vì crash ngầm
       if (!config) {
@@ -489,10 +769,25 @@
       
       try {
           this._ensureCardShell();
+          const oldDefaultProfileSignature = this.getConfiguredDefaultProfileSignature
+            ? this.getConfiguredDefaultProfileSignature()
+            : `${this._config && this._config.default_profile_id !== undefined ? String(this._config.default_profile_id || '').trim() : ''}||${this._config && this._config.default_profile_name !== undefined ? String(this._config.default_profile_name || '').trim() : ''}`;
+          const newDefaultProfileSignature = `${config && config.default_profile_id !== undefined ? String(config.default_profile_id || '').trim() : ''}||${config && config.default_profile_name !== undefined ? String(config.default_profile_name || '').trim() : ''}`;
           this._config = config;
+          if (oldDefaultProfileSignature !== newDefaultProfileSignature) {
+              this._hasAppliedDefaultProfile = false;
+              this._manualProfileSelection = false;
+              this._lastDefaultProfileConfig = '';
+              this._selectedMonth = 'all';
+              this._historyPage = 1;
+              this._searchPage = 1;
+              this._warrantyPage = 1;
+              this._expandedOrderId = null;
+              this.applyDefaultProfileSelection({ force: true });
+          }
           this.updateTheme();
-          this.renderHeaderAndTabs();
-          if (this._hass) this.scheduleFullScan(100, { force: true });
+          this.renderHeaderAndTabs(true);
+          if (this._hass) this.scheduleFullScan(100, { force: true, reason: 'config-default-profile-changed', forceDefault: true });
       } catch (err) {
           console.error("Shopping History: Error in setConfig", err);
           this._isError = true;
@@ -714,30 +1009,15 @@
                  counter++;
               }
 
-              this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map };
+              const aliases = Array.from(new Set([gId, uniqueName, finalName, this._configEntriesMap[gId], ...group.displayNames].filter(Boolean).map(v => String(v).trim()).filter(Boolean)));
+              this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map, aliases };
               this._profileList.push(this._profilesData[gId]);
           });
 
           this._profileList.sort((a, b) => a.name.localeCompare(b.name));
           
-          if (!this._currentProfileId || !this._profilesData[this._currentProfileId]) {
-              if (this._profileList.length > 0) {
-                  this._currentProfileId = this._profileList[0].id;
-                  this._selectedMonth = 'all'; 
-              } else {
-                  this._currentProfileId = null;
-              }
-          }
-
-          if (this._currentProfileId && this._profilesData[this._currentProfileId]) {
-              this._availableYears = Array.from(this._profilesData[this._currentProfileId].years).sort((a, b) => b - a);
-              if (!this._availableYears.includes(this._selectedYear) && this._availableYears.length > 0) {
-                  this._selectedYear = this._availableYears[0];
-                  this._selectedMonth = 'all';
-              }
-          } else {
-              this._availableYears = [];
-          }
+          this.applyDefaultProfileSelection({ force: options.forceDefault === true || options.reason === 'config-default-profile-changed' });
+          this.refreshAvailableYearsForCurrentProfile();
 
           this.updateData();
 
@@ -1136,8 +1416,8 @@
             const pNav = e.target.closest('.profile-nav');
             if (pNav) {
                 let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
-                if (pNav.id === 'prev-profile' && idx > 0) { this._currentProfileId = this._profileList[idx - 1].id; this.updateData(); }
-                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this._currentProfileId = this._profileList[idx + 1].id; this.updateData(); }
+                if (pNav.id === 'prev-profile' && idx > 0) { this.setCurrentProfileId(this._profileList[idx - 1].id, { manual: true, resetView: true }); this.updateData(); }
+                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this.setCurrentProfileId(this._profileList[idx + 1].id, { manual: true, resetView: true }); this.updateData(); }
                 return;
             }
 
@@ -1160,7 +1440,7 @@
         });
 
         this.card.addEventListener('change', (e) => {
-            if (e.target.id === 'profile-select') { this._currentProfileId = e.target.value; this.updateData(); }
+            if (e.target.id === 'profile-select') { this.setCurrentProfileId(e.target.value, { manual: true, resetView: true }); this.updateData(); }
             else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value, 10); this.updateData(); }
             else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.updateData(); }
             else if (e.target.id === 'warranty-slider') {
