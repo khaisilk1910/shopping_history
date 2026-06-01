@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  const SHOPPING_HISTORY_CARD_VERSION = '2026.05.29-ha-optimized';
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.06.01-ha-mobile-network-optimized';
 
   // --- HÀM TIỆN ÍCH CHUNG ---
   const esc = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -310,7 +310,11 @@
       this._scanRetryCount = 0;
       this._maxScanRetries = 40;
       this._scanAgainAfterCurrent = false;
+      this._scanGeneration = 0;
       this._resumeHandler = null;
+      this._networkRecoveryTimers = [];
+      this._wsTimeoutMs = 6000;
+      this._serviceTimeoutMs = 15000;
 
       try {
           this._ensureCardShell();
@@ -325,17 +329,22 @@
           this.updateTheme();
 
           if (!this._resumeHandler) {
-              this._resumeHandler = () => {
-                  if (!document.hidden) this.scheduleFullScan(500, { force: true });
+              this._resumeHandler = (event) => {
+                  if (typeof document !== 'undefined' && document.hidden) return;
+                  const reason = event && event.type ? event.type : 'app-resume';
+                  this.scheduleNetworkRecovery(reason);
               };
               document.addEventListener('visibilitychange', this._resumeHandler);
               window.addEventListener('focus', this._resumeHandler);
               window.addEventListener('pageshow', this._resumeHandler);
-              // Android/iOS HA Companion app resume
+              window.addEventListener('online', this._resumeHandler);
+              // Android/iOS HA Companion app resume / network restore variants
               window.addEventListener('ha-appstate-changed', this._resumeHandler);
+              window.addEventListener('appstatechange', this._resumeHandler);
+              window.addEventListener('connection-changed', this._resumeHandler);
           }
 
-          if (this._hass) this.scheduleFullScan(100, { force: true });
+          if (this._hass) this.scheduleFullScan(100, { force: true, reason: 'connected' });
       } catch (err) {
           console.error("[ShoppingHistory] connectedCallback error:", err);
       }
@@ -346,11 +355,15 @@
           clearTimeout(this._scanScheduled);
           this._scanScheduled = null;
       }
+      this.clearNetworkRecoveryTimers();
       if (this._resumeHandler) {
           document.removeEventListener('visibilitychange', this._resumeHandler);
           window.removeEventListener('focus', this._resumeHandler);
           window.removeEventListener('pageshow', this._resumeHandler);
+          window.removeEventListener('online', this._resumeHandler);
           window.removeEventListener('ha-appstate-changed', this._resumeHandler);
+          window.removeEventListener('appstatechange', this._resumeHandler);
+          window.removeEventListener('connection-changed', this._resumeHandler);
           this._resumeHandler = null;
       }
     }
@@ -399,8 +412,64 @@
       if (this._scanScheduled) clearTimeout(this._scanScheduled);
       this._scanScheduled = setTimeout(() => {
           this._scanScheduled = null;
-          this.performFullScan(options);
+          this.performFullScan(options).catch(err => {
+              console.error("Shopping History: scheduled scan failed", err);
+          });
       }, delay);
+    }
+
+    clearNetworkRecoveryTimers() {
+      if (!this._networkRecoveryTimers) return;
+      this._networkRecoveryTimers.forEach(timer => clearTimeout(timer));
+      this._networkRecoveryTimers = [];
+    }
+
+    scheduleNetworkRecovery(reason = 'network-resume') {
+      this.clearNetworkRecoveryTimers();
+      this._scanRetryCount = 0;
+      const delays = [0, 750, 2500, 6000];
+      this._networkRecoveryTimers = delays.map(delay => setTimeout(() => {
+          this.scheduleFullScan(0, { force: true, reason });
+      }, delay));
+    }
+
+    isHassConnectionRefreshed(oldHass, newHass) {
+      if (!oldHass) return true;
+      if (this._isError || !this._trackedEntities || this._trackedEntities.length === 0 || !this._currentProfileId) return true;
+      if (oldHass.connection && newHass.connection && oldHass.connection !== newHass.connection) return true;
+      if (oldHass.connected === false && newHass.connected !== false) return true;
+
+      const oldCount = oldHass.states ? Object.keys(oldHass.states).length : 0;
+      const newCount = newHass.states ? Object.keys(newHass.states).length : 0;
+      return oldCount !== newCount;
+    }
+
+    async withTimeout(promise, timeoutMs, label) {
+      let timer = null;
+      try {
+          return await Promise.race([
+              promise,
+              new Promise((_, reject) => {
+                  timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+              })
+          ]);
+      } finally {
+          if (timer) clearTimeout(timer);
+      }
+    }
+
+    callWSWithTimeout(payload, timeoutMs = this._wsTimeoutMs) {
+      if (!this._hass || typeof this._hass.callWS !== 'function') {
+          return Promise.reject(new Error('Home Assistant callWS chưa sẵn sàng'));
+      }
+      return this.withTimeout(this._hass.callWS(payload), timeoutMs, `callWS:${payload.type}`);
+    }
+
+    callServiceWithTimeout(domain, service, data, timeoutMs = this._serviceTimeoutMs) {
+      if (!this._hass || typeof this._hass.callService !== 'function') {
+          return Promise.reject(new Error('Home Assistant callService chưa sẵn sàng'));
+      }
+      return this.withTimeout(this._hass.callService(domain, service, data), timeoutMs, `callService:${domain}.${service}`);
     }
 
     setConfig(config) {
@@ -431,16 +500,22 @@
           this._hass = hass;
 
           if (!oldHass) {
-              this.scheduleFullScan(200, { force: true });
+              this.scheduleFullScan(200, { force: true, reason: 'first-hass' });
               return;
           }
 
+          const forceRescan = this.isHassConnectionRefreshed(oldHass, hass);
+
           if (this._isScanning) {
-              this._scanAgainAfterCurrent = true;
+              if (forceRescan) {
+                  this.scheduleFullScan(300, { force: true, reason: 'hass-refreshed-while-scanning' });
+              } else {
+                  this._scanAgainAfterCurrent = true;
+              }
               return;
           }
           
-          let shouldUpdate = !this._trackedEntities || this._trackedEntities.length === 0 || !this._currentProfileId;
+          let shouldUpdate = forceRescan || !this._trackedEntities || this._trackedEntities.length === 0 || !this._currentProfileId;
           if (!shouldUpdate && this._trackedEntities && this._trackedEntities.length > 0) {
               for (let eid of this._trackedEntities) {
                   if (oldHass.states[eid] !== hass.states[eid]) {
@@ -451,7 +526,7 @@
           }
 
           if (shouldUpdate) {
-              this.scheduleFullScan(150);
+              this.scheduleFullScan(forceRescan ? 50 : 150, { force: forceRescan, reason: forceRescan ? 'hass-refreshed' : 'state-updated' });
           }
       } catch (err) {
           console.error("Shopping History: Error in set hass", err);
@@ -459,7 +534,6 @@
     }
 
     async forceReload(iconEl) {
-        if (this._isScanning) return;
         this._isError = false;
 
         if (iconEl) iconEl.classList.add('spin');
@@ -467,7 +541,7 @@
         try {
             this.updateTheme();
             this._scanRetryCount = 0;
-            await this.performFullScan({ force: true });
+            await this.performFullScan({ force: true, reason: 'manual-reload' });
         } catch (err) {
             console.error("Lỗi khi tải lại dữ liệu:", err);
             this._isError = true;
@@ -483,31 +557,54 @@
       const { force = false } = options;
       this._ensureCardShell();
       if (!this._hass || !this._hass.states) return;
-      if (this._isScanning && !force) return;
+      if (this._isScanning && !force) {
+          this._scanAgainAfterCurrent = true;
+          return;
+      }
+
+      const scanId = ++this._scanGeneration;
       this._isScanning = true;
       this._isError = false;
 
       try {
+          const activeHass = this._hass;
           let shoppingEntries = [];
           try {
-              const entries = await this._hass.callWS({ type: 'config_entries/get' });
-              this._configEntriesMap = {};
-              shoppingEntries = entries.filter(e => e.domain === 'shopping_history');
-              shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
+              const [entriesResult, entitiesResult] = await Promise.allSettled([
+                  this.callWSWithTimeout({ type: 'config_entries/get' }),
+                  this.callWSWithTimeout({ type: 'config/entity_registry/list' })
+              ]);
 
-              const entities = await this._hass.callWS({ type: 'config/entity_registry/list' });
+              if (scanId !== this._scanGeneration) return;
+
+              this._configEntriesMap = {};
+              if (entriesResult.status === 'fulfilled' && Array.isArray(entriesResult.value)) {
+                  shoppingEntries = entriesResult.value.filter(e => e && e.domain === 'shopping_history');
+                  shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
+              }
+
               this._entityRegistryMap = {};
-              entities.forEach(ent => { this._entityRegistryMap[ent.entity_id] = ent.config_entry_id; });
+              if (entitiesResult.status === 'fulfilled' && Array.isArray(entitiesResult.value)) {
+                  entitiesResult.value.forEach(ent => {
+                      if (ent && ent.entity_id) this._entityRegistryMap[ent.entity_id] = ent.config_entry_id;
+                  });
+              }
+
+              if (entriesResult.status === 'rejected' || entitiesResult.status === 'rejected') {
+                  console.warn("Shopping History: callWS fallback.", entriesResult.reason || entitiesResult.reason);
+              }
           } catch (wsErr) {
               console.warn("Shopping History: callWS fallback.", wsErr);
           }
 
-          const yearSensors = Object.keys(this._hass.states).filter(eid =>
+          if (scanId !== this._scanGeneration) return;
+          const states = (activeHass && activeHass.states) ? activeHass.states : (this._hass && this._hass.states ? this._hass.states : {});
+          const yearSensors = Object.keys(states).filter(eid =>
             eid.startsWith('sensor.') &&
-            this._hass.states[eid] &&
-            this._hass.states[eid].attributes &&
-            this._hass.states[eid].attributes.danh_sach_chi_tiet !== undefined &&
-            this._hass.states[eid].attributes.nam !== undefined
+            states[eid] &&
+            states[eid].attributes &&
+            states[eid].attributes.danh_sach_chi_tiet !== undefined &&
+            states[eid].attributes.nam !== undefined
           );
 
           this._trackedEntities = yearSensors;
@@ -540,7 +637,7 @@
 
           yearSensors.forEach(eid => {
             try {
-                const state = this._hass.states[eid];
+                const state = states[eid];
                 const attrs = state.attributes || {};
                 const y = parseInt(attrs.nam);
                 
@@ -554,6 +651,7 @@
                 
                 if (!isNaN(y)) {
                     let groupId = this._entityRegistryMap[eid] || 
+                                  (activeHass.entities && activeHass.entities[eid] ? activeHass.entities[eid].config_entry_id : null) ||
                                   (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
                                   attrs.config_entry_id;
 
@@ -636,10 +734,12 @@
           this.renderHeaderAndTabs();
           this.renderError();
       } finally {
-          this._isScanning = false;
-          if (this._scanAgainAfterCurrent) {
-              this._scanAgainAfterCurrent = false;
-              this.scheduleFullScan(100);
+          if (scanId === this._scanGeneration) {
+              this._isScanning = false;
+              if (this._scanAgainAfterCurrent) {
+                  this._scanAgainAfterCurrent = false;
+                  this.scheduleFullScan(100, { reason: 'queued-update' });
+              }
           }
       }
     }
@@ -1751,8 +1851,9 @@
       const orderId = this._itemToDelete;
       
       try {
-          await this._hass.callService('shopping_history', 'delete_order', { entry_id: entryId, order_id: orderId });
+          await this.callServiceWithTimeout('shopping_history', 'delete_order', { entry_id: entryId, order_id: orderId });
           this.closeDeleteModal();
+          this.scheduleFullScan(250, { force: true, reason: 'delete-order' });
       } catch(err) {
           alert("Lỗi khi xóa từ Home Assistant: " + err.message);
           this.closeDeleteModal();
@@ -1788,10 +1889,11 @@
       }
 
       try {
-          await this._hass.callService('shopping_history', serviceName, data);
+          await this.callServiceWithTimeout('shopping_history', serviceName, data);
           formEl.reset();
           this._editingOrder = null;
           this.switchTab('history');
+          this.scheduleFullScan(250, { force: true, reason: serviceName });
       } catch(err) {
           alert("Lỗi khi lưu: " + err.message);
       }
