@@ -1,6 +1,7 @@
 """The Shopping History integration."""
 import sqlite3
 import os
+import hashlib
 import logging
 import voluptuous as vol
 from datetime import timedelta
@@ -8,15 +9,13 @@ import homeassistant.util.dt as dt_util
 from dateutil.relativedelta import relativedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, CoreState
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.loader import async_get_integration
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.lovelace.resources import ResourceStorageCollection
 
 from .const import DOMAIN, CONF_FRIENDLY_NAME, SIGNAL_UPDATE_SENSORS
 
@@ -63,38 +62,47 @@ SERVICE_DELETE_ORDER_SCHEMA = vol.Schema({
     vol.Required("order_id"): vol.Coerce(int),
 })
 
-async def init_resource(hass: HomeAssistant, url: str, ver: str) -> None:
-    url_with_version = f"{url}?hacstag={ver}"
+async def init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
+    """Register the Lovelace custom card resource with safe cache busting.
 
-    add_extra_js_url(hass, url_with_version)
+    Avoid registering the same JS twice via both add_extra_js_url and Lovelace
+    resources. Duplicate registration can make browsers keep a failed custom-card
+    load per origin/IP/domain until the cache is cleared.
+    """
+    url_with_version = f"{url}?v={ver}"
 
-    async def _register_resource(*args):
-        lovelace = hass.data.get("lovelace")
-        if not lovelace:
-            return
+    lovelace = hass.data.get("lovelace")
+    if not lovelace:
+        add_extra_js_url(hass, url_with_version)
+        return False
 
-        resources = getattr(lovelace, "resources", None) or lovelace.get("resources")
-        if not isinstance(resources, ResourceStorageCollection):
-            return
+    resources = getattr(lovelace, "resources", None)
+    if resources is None and hasattr(lovelace, "get"):
+        resources = lovelace.get("resources")
 
-        if not resources.loaded:
-            await resources.async_load()
+    if not resources or not hasattr(resources, "async_items"):
+        add_extra_js_url(hass, url_with_version)
+        return False
 
-        for item in resources.async_items():
-            item_url = item.get("url", "")
-            base_url = item_url.split("?")[0]
-            
-            if base_url == url:
-                if item_url != url_with_version:
-                    await resources.async_update_item(item["id"], {"res_type": "module", "url": url_with_version})
-                return
+    if hasattr(resources, "async_get_info"):
+        await resources.async_get_info()
+    elif hasattr(resources, "async_load") and not getattr(resources, "loaded", True):
+        await resources.async_load()
 
-        await resources.async_create_item({"res_type": "module", "url": url_with_version})
+    for item in resources.async_items():
+        item_url = item.get("url", "")
+        base_url = item_url.split("?")[0]
 
-    if hass.state == CoreState.running:
-        await _register_resource()
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_resource)
+        if base_url == url:
+            if item_url != url_with_version:
+                await resources.async_update_item(
+                    item["id"],
+                    {"res_type": "module", "url": url_with_version},
+                )
+            return True
+
+    await resources.async_create_item({"res_type": "module", "url": url_with_version})
+    return True
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -224,10 +232,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     integration = await async_get_integration(hass, DOMAIN)
     fallback_version = integration.version if integration and integration.version else "1.0"
     
-    def get_file_version(file_name, fallback):
+    def get_file_version(file_name: str, fallback: str) -> str:
         try:
             file_path = hass.config.path("custom_components", DOMAIN, UI_DIR_PATH, file_name)
-            return str(int(os.path.getmtime(file_path)))
+            st = os.stat(file_path)
+            with open(file_path, "rb") as file_obj:
+                digest = hashlib.sha256(file_obj.read()).hexdigest()[:12]
+            return f"{fallback}-{int(st.st_mtime)}-{st.st_size}-{digest}"
         except Exception:
             return fallback
 
