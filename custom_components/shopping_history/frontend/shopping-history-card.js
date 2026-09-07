@@ -1,7 +1,7 @@
 (function() {
   'use strict';
 
-  const SHOPPING_HISTORY_CARD_VERSION = '2026.06.01-default-profile-ui-short-name';
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.09.07-recorder-safe-websocket-data';
 
   // --- HÀM TIỆN ÍCH CHUNG ---
   const esc = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -74,7 +74,7 @@
       Object.keys(states).forEach(eid => {
         const state = states[eid];
         const attrs = state && state.attributes ? state.attributes : {};
-        if (!eid.startsWith('sensor.') || attrs.danh_sach_chi_tiet === undefined || attrs.nam === undefined) return;
+        if (!eid.startsWith('sensor.') || attrs.nam === undefined || (attrs.shopping_history !== true && attrs.danh_sach_chi_tiet === undefined)) return;
 
         let groupId = (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) || attrs.config_entry_id;
         if (!groupId) {
@@ -620,6 +620,35 @@
       return this.withTimeout(this._hass.callService(domain, service, data), timeoutMs, `callService:${domain}.${service}`);
     }
 
+    async loadProfileItems(profileId) {
+      if (!profileId || !this._profilesData || !this._profilesData[profileId]) return;
+
+      const result = await this.callWSWithTimeout({
+          type: 'shopping_history/get_data',
+          entry_id: profileId
+      });
+
+      const profile = this._profilesData[profileId];
+      profile.items = result && Array.isArray(result.items) ? result.items : [];
+      profile.revision = result && result.revision !== undefined ? result.revision : 0;
+
+      if (result && Array.isArray(result.years)) {
+          const years = result.years
+              .map(year => parseInt(year))
+              .filter(year => !isNaN(year));
+          profile.years = new Set(years);
+      }
+
+      this._uniqueCategories.clear();
+      this._uniquePlaces.clear();
+      this._uniqueManufacturers.clear();
+      profile.items.forEach(item => {
+          if (item.nganh_hang) this._uniqueCategories.add(String(item.nganh_hang).trim());
+          if (item.noi_mua) this._uniquePlaces.add(String(item.noi_mua).trim());
+          if (item.hang_sx) this._uniqueManufacturers.add(String(item.hang_sx).trim());
+      });
+    }
+
     getConfiguredDefaultProfileValue() {
       return this._config && this._config.default_profile_id !== undefined
         ? String(this._config.default_profile_id || '').trim()
@@ -907,8 +936,9 @@
             eid.startsWith('sensor.') &&
             states[eid] &&
             states[eid].attributes &&
-            states[eid].attributes.danh_sach_chi_tiet !== undefined &&
-            states[eid].attributes.nam !== undefined
+            states[eid].attributes.nam !== undefined &&
+            (states[eid].attributes.shopping_history === true ||
+             states[eid].attributes.danh_sach_chi_tiet !== undefined)
           );
 
           this._trackedEntities = yearSensors;
@@ -1017,6 +1047,7 @@
           this._profileList.sort((a, b) => a.name.localeCompare(b.name));
           
           this.applyDefaultProfileSelection({ force: options.forceDefault === true || options.reason === 'config-default-profile-changed' });
+          await this.loadProfileItems(this._currentProfileId);
           this.refreshAvailableYearsForCurrentProfile();
 
           this.updateData();
@@ -1054,13 +1085,8 @@
           }
           
           const currentProf = this._profilesData[this._currentProfileId];
-
-          Object.values(currentProf.map).forEach(eid => {
-              const state = this._hass.states[eid];
-              if (state && state.attributes && state.attributes.danh_sach_chi_tiet) {
-                  this._allProfileItems.push(...state.attributes.danh_sach_chi_tiet);
-              }
-          });
+          const profileItems = Array.isArray(currentProf.items) ? currentProf.items : [];
+          this._allProfileItems = [...profileItems];
           this._allProfileItems.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
 
           if (!this._initialWarrantyChecked) {
@@ -1074,29 +1100,25 @@
               }
           }
 
-          const yearEid = currentProf.map[this._selectedYear];
-          if (yearEid) {
-              const yearState = this._hass.states[yearEid];
-              if (yearState && yearState.attributes && yearState.attributes.danh_sach_chi_tiet) {
-                  const allItems = yearState.attributes.danh_sach_chi_tiet;
-                  const mSet = new Set();
-                  allItems.forEach(i => { if(i.thang) mSet.add(parseInt(i.thang)); });
-                  this._availableMonths = Array.from(mSet).filter(m => !isNaN(m)).sort((a,b) => a - b); 
-                  
-                  if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth))) {
-                      this._selectedMonth = 'all';
-                      this._items = [...allItems];
-                      this._stats.orders = yearState.attributes.tong_don_hang || allItems.length;
-                      this._stats.items = yearState.attributes.tong_so_luong || allItems.reduce((sum, item) => sum + (item.so_luong || 0), 0);
-                      this._stats.total = yearState.attributes.tong_tien || allItems.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
-                  } else {
-                      this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
-                      this._stats.orders = this._items.length;
-                      this._stats.items = this._items.reduce((sum, item) => sum + (item.so_luong || 0), 0);
-                      this._stats.total = this._items.reduce((sum, item) => sum + (item.thanh_tien_sau_vat || 0), 0);
-                  }
+          const allItems = this._allProfileItems.filter(item => parseInt(item.nam) === parseInt(this._selectedYear));
+          const mSet = new Set();
+          allItems.forEach(item => {
+              if (item.thang !== undefined && item.thang !== null && item.thang !== '') {
+                  mSet.add(parseInt(item.thang));
               }
+          });
+          this._availableMonths = Array.from(mSet).filter(m => !isNaN(m)).sort((a, b) => a - b);
+
+          if (this._selectedMonth === 'all' || !this._availableMonths.includes(parseInt(this._selectedMonth))) {
+              this._selectedMonth = 'all';
+              this._items = [...allItems];
+          } else {
+              this._items = allItems.filter(item => parseInt(item.thang) === parseInt(this._selectedMonth));
           }
+
+          this._stats.orders = this._items.length;
+          this._stats.items = this._items.reduce((sum, item) => sum + (Number(item.so_luong) || 0), 0);
+          this._stats.total = this._items.reduce((sum, item) => sum + (Number(item.thanh_tien_sau_vat) || 0), 0);
 
           this._items.sort((a, b) => (new Date(b.ngay_mua || 0).getTime() || 0) - (new Date(a.ngay_mua || 0).getTime() || 0));
           
@@ -1416,8 +1438,8 @@
             const pNav = e.target.closest('.profile-nav');
             if (pNav) {
                 let idx = this._profileList.findIndex(p => p.id === this._currentProfileId);
-                if (pNav.id === 'prev-profile' && idx > 0) { this.setCurrentProfileId(this._profileList[idx - 1].id, { manual: true, resetView: true }); this.updateData(); }
-                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this.setCurrentProfileId(this._profileList[idx + 1].id, { manual: true, resetView: true }); this.updateData(); }
+                if (pNav.id === 'prev-profile' && idx > 0) { this.setCurrentProfileId(this._profileList[idx - 1].id, { manual: true, resetView: true }); this.scheduleFullScan(0, { force: true, reason: 'profile-change' }); }
+                else if (pNav.id === 'next-profile' && idx < this._profileList.length - 1) { this.setCurrentProfileId(this._profileList[idx + 1].id, { manual: true, resetView: true }); this.scheduleFullScan(0, { force: true, reason: 'profile-change' }); }
                 return;
             }
 
@@ -1440,7 +1462,7 @@
         });
 
         this.card.addEventListener('change', (e) => {
-            if (e.target.id === 'profile-select') { this.setCurrentProfileId(e.target.value, { manual: true, resetView: true }); this.updateData(); }
+            if (e.target.id === 'profile-select') { this.setCurrentProfileId(e.target.value, { manual: true, resetView: true }); this.scheduleFullScan(0, { force: true, reason: 'profile-change' }); }
             else if (e.target.id === 'year-select') { this._selectedYear = parseInt(e.target.value, 10); this.updateData(); }
             else if (e.target.id === 'month-select') { this._selectedMonth = e.target.value; this.updateData(); }
             else if (e.target.id === 'warranty-slider') {

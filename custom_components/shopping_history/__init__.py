@@ -1,315 +1,303 @@
 """The Shopping History integration."""
-import sqlite3
-import os
+
+from __future__ import annotations
+
+from calendar import monthrange
+from dataclasses import dataclass
+from datetime import date
 import hashlib
 import logging
-import voluptuous as vol
-from datetime import timedelta
-import homeassistant.util.dt as dt_util
-from dateutil.relativedelta import relativedelta
+import os
+from typing import Any
 
+import voluptuous as vol
+
+from homeassistant.components import websocket_api
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
+from homeassistant.util import dt as dt_util
 
-from homeassistant.components.http import StaticPathConfig
-from homeassistant.components.frontend import add_extra_js_url
-
-from .const import DOMAIN, CONF_FRIENDLY_NAME, SIGNAL_UPDATE_SENSORS
+from .const import DOMAIN, SIGNAL_UPDATE_SENSORS
+from .storage import OrderNotFoundError, ShoppingHistoryStore
 
 _LOGGER = logging.getLogger(__name__)
 
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 UI_URL_BASE = "/shopping_history_ui"
 UI_DIR_PATH = "frontend"
 
-SERVICE_ADD_ORDER_SCHEMA = vol.Schema({
-    vol.Required("entry_id"): cv.string,
-    vol.Required("name"): cv.string,
-    vol.Required("place"): cv.string,
-    vol.Required("category"): cv.string,
-    vol.Required("price"): vol.Coerce(float),
-    vol.Required("quantity"): vol.Coerce(float),
-    vol.Optional("vat", default=0): vol.Coerce(float),
-    vol.Required("status"): cv.string,
-    vol.Optional("model", default=""): cv.string,
-    vol.Optional("manufacturer", default=""): cv.string,
-    vol.Optional("warranty_months", default=0): vol.Coerce(int),
-    vol.Optional("purchase_date"): cv.string,
-    vol.Optional("note", default=""): cv.string,
-})
 
-SERVICE_EDIT_ORDER_SCHEMA = vol.Schema({
-    vol.Required("entry_id"): cv.string,
-    vol.Required("order_id"): vol.Coerce(int),
-    vol.Required("name"): cv.string,
-    vol.Required("place"): cv.string,
-    vol.Required("category"): cv.string,
-    vol.Required("price"): vol.Coerce(float),
-    vol.Required("quantity"): vol.Coerce(float),
-    vol.Optional("vat", default=0): vol.Coerce(float),
-    vol.Required("status"): cv.string,
-    vol.Optional("model", default=""): cv.string,
-    vol.Optional("manufacturer", default=""): cv.string,
-    vol.Optional("warranty_months", default=0): vol.Coerce(int),
-    vol.Optional("purchase_date"): cv.string,
-    vol.Optional("note", default=""): cv.string,
-})
+@dataclass(slots=True)
+class ShoppingHistoryData:
+    """Runtime data attached to a config entry."""
 
-SERVICE_DELETE_ORDER_SCHEMA = vol.Schema({
-    vol.Required("entry_id"): cv.string,
-    vol.Required("order_id"): vol.Coerce(int),
-})
-
-async def init_resource(hass: HomeAssistant, url: str, ver: str) -> bool:
-    """Register the Lovelace custom card resource with safe cache busting.
-
-    Avoid registering the same JS twice via both add_extra_js_url and Lovelace
-    resources. Duplicate registration can make browsers keep a failed custom-card
-    load per origin/IP/domain until the cache is cleared.
-    """
-    url_with_version = f"{url}?v={ver}"
-
-    lovelace = hass.data.get("lovelace")
-    if not lovelace:
-        add_extra_js_url(hass, url_with_version)
-        return False
-
-    resources = getattr(lovelace, "resources", None)
-    if resources is None and hasattr(lovelace, "get"):
-        resources = lovelace.get("resources")
-
-    if not resources or not hasattr(resources, "async_items"):
-        add_extra_js_url(hass, url_with_version)
-        return False
-
-    if hasattr(resources, "async_get_info"):
-        await resources.async_get_info()
-    elif hasattr(resources, "async_load") and not getattr(resources, "loaded", True):
-        await resources.async_load()
-
-    for item in resources.async_items():
-        item_url = item.get("url", "")
-        base_url = item_url.split("?")[0]
-
-        if base_url == url:
-            if item_url != url_with_version:
-                await resources.async_update_item(
-                    item["id"],
-                    {"res_type": "module", "url": url_with_version},
-                )
-            return True
-
-    await resources.async_create_item({"res_type": "module", "url": url_with_version})
-    return True
+    store: ShoppingHistoryStore
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(
-            UI_URL_BASE,
-            hass.config.path("custom_components", DOMAIN, UI_DIR_PATH),
-            False
-        )
-    ])
-    
-    async def handle_add_order(call: ServiceCall):
-        entry_id = call.data.get("entry_id")
-        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        if not entry_data: return
-        db_path = entry_data["db_path"]
-        data = call.data
-        
-        purchase_dt = dt_util.parse_date(data["purchase_date"]) if data.get("purchase_date") else dt_util.now().date()
-        y, m, d = purchase_dt.year, purchase_dt.month, purchase_dt.day
-        date_str = purchase_dt.strftime("%Y-%m-%d")
+ShoppingHistoryConfigEntry = ConfigEntry[ShoppingHistoryData]
 
-        total_pre_tax = data["price"] * data["quantity"]
-        vat_amt = total_pre_tax * (data["vat"] / 100) if data["vat"] > 0 else 0
-        total_post_tax = total_pre_tax + vat_amt
 
-        warranty_end_str = ""
-        if data["warranty_months"] > 0:
-            end_date = purchase_dt + relativedelta(months=data["warranty_months"])
-            warranty_end_str = end_date.strftime("%Y-%m-%d")
+def _validate_purchase_date(value: Any) -> date:
+    """Validate a service date value."""
+    if isinstance(value, date):
+        return value
+    parsed = dt_util.parse_date(str(value))
+    if parsed is None:
+        raise vol.Invalid("purchase_date must use YYYY-MM-DD")
+    return parsed
 
-        def db_insert_work():
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO purchases (
-                    ngay_mua, nam, thang, ngay, 
-                    ten_hang, noi_mua, so_luong, don_gia, thanh_tien, 
-                    vat_percent, tien_vat, thanh_tien_sau_vat, 
-                    model, tinh_trang, nganh_hang, hang_sx, 
-                    thoi_gian_bh_thang, ngay_het_bh, ghi_chu
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                date_str, y, m, d,
-                data["name"], data["place"], data["quantity"], data["price"], total_pre_tax,
-                data["vat"], vat_amt, total_post_tax,
-                data["model"], data["status"], data["category"], data["manufacturer"],
-                data["warranty_months"], warranty_end_str, data.get("note", "")
-            ))
-            conn.commit()
-            conn.close()
 
-        await hass.async_add_executor_job(db_insert_work)
-        async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
+_NON_NEGATIVE_FLOAT = vol.All(vol.Coerce(float), vol.Range(min=0))
+_POSITIVE_FLOAT = vol.All(vol.Coerce(float), vol.Range(min=0.000001))
+_NON_NEGATIVE_INT = vol.All(vol.Coerce(int), vol.Range(min=0))
+_VAT_PERCENT = vol.All(vol.Coerce(float), vol.Range(min=0, max=100))
 
-    async def handle_edit_order(call: ServiceCall):
-        entry_id = call.data.get("entry_id")
-        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        if not entry_data: return
-        db_path = entry_data["db_path"]
-        data = call.data
-        order_id = data["order_id"]
-        
-        purchase_dt = dt_util.parse_date(data["purchase_date"]) if data.get("purchase_date") else dt_util.now().date()
-        y, m, d = purchase_dt.year, purchase_dt.month, purchase_dt.day
-        date_str = purchase_dt.strftime("%Y-%m-%d")
+SERVICE_ADD_ORDER_SCHEMA = vol.Schema(
+    {
+        vol.Required("entry_id"): cv.string,
+        vol.Required("name"): cv.string,
+        vol.Required("place"): cv.string,
+        vol.Required("category"): cv.string,
+        vol.Required("price"): _NON_NEGATIVE_FLOAT,
+        vol.Required("quantity"): _POSITIVE_FLOAT,
+        vol.Optional("vat", default=0): _VAT_PERCENT,
+        vol.Required("status"): cv.string,
+        vol.Optional("model", default=""): cv.string,
+        vol.Optional("manufacturer", default=""): cv.string,
+        vol.Optional("warranty_months", default=0): _NON_NEGATIVE_INT,
+        vol.Optional("purchase_date"): _validate_purchase_date,
+        vol.Optional("note", default=""): cv.string,
+    }
+)
 
-        total_pre_tax = data["price"] * data["quantity"]
-        vat_amt = total_pre_tax * (data["vat"] / 100) if data["vat"] > 0 else 0
-        total_post_tax = total_pre_tax + vat_amt
+SERVICE_EDIT_ORDER_SCHEMA = vol.Schema(
+    {
+        **SERVICE_ADD_ORDER_SCHEMA.schema,
+        vol.Required("order_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    }
+)
 
-        warranty_end_str = ""
-        if data["warranty_months"] > 0:
-            end_date = purchase_dt + relativedelta(months=data["warranty_months"])
-            warranty_end_str = end_date.strftime("%Y-%m-%d")
+SERVICE_DELETE_ORDER_SCHEMA = vol.Schema(
+    {
+        vol.Required("entry_id"): cv.string,
+        vol.Required("order_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    }
+)
 
-        def db_update_work():
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE purchases SET
-                    ngay_mua=?, nam=?, thang=?, ngay=?, 
-                    ten_hang=?, noi_mua=?, so_luong=?, don_gia=?, thanh_tien=?, 
-                    vat_percent=?, tien_vat=?, thanh_tien_sau_vat=?, 
-                    model=?, tinh_trang=?, nganh_hang=?, hang_sx=?, 
-                    thoi_gian_bh_thang=?, ngay_het_bh=?, ghi_chu=?
-                WHERE id=?
-            """, (
-                date_str, y, m, d,
-                data["name"], data["place"], data["quantity"], data["price"], total_pre_tax,
-                data["vat"], vat_amt, total_post_tax,
-                data["model"], data["status"], data["category"], data["manufacturer"],
-                data["warranty_months"], warranty_end_str, data.get("note", ""),
-                order_id
-            ))
-            conn.commit()
-            conn.close()
 
-        await hass.async_add_executor_job(db_update_work)
-        async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
+def _add_months(value: date, months: int) -> date:
+    """Add calendar months without relying on an external date library."""
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
 
-    async def handle_delete_order(call: ServiceCall):
-        entry_id = call.data.get("entry_id")
-        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        if not entry_data: return
-        db_path = entry_data["db_path"]
-        order_id = call.data["order_id"]
 
-        def db_delete_work():
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM purchases WHERE id=?", (order_id,))
-            conn.commit()
-            conn.close()
+def _build_order(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize service data into the SQLite row format."""
+    purchase_date = data.get("purchase_date") or dt_util.now().date()
+    if not isinstance(purchase_date, date):
+        raise HomeAssistantError("Ngày mua không hợp lệ")
 
-        await hass.async_add_executor_job(db_delete_work)
-        async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
+    quantity = float(data["quantity"])
+    price = float(data["price"])
+    vat_percent = float(data["vat"])
+    pre_tax = price * quantity
+    vat_amount = pre_tax * vat_percent / 100 if vat_percent else 0.0
+    post_tax = pre_tax + vat_amount
 
-    hass.services.async_register(DOMAIN, "add_order", handle_add_order, schema=SERVICE_ADD_ORDER_SCHEMA)
-    hass.services.async_register(DOMAIN, "edit_order", handle_edit_order, schema=SERVICE_EDIT_ORDER_SCHEMA)
-    hass.services.async_register(DOMAIN, "delete_order", handle_delete_order, schema=SERVICE_DELETE_ORDER_SCHEMA)
-
-    return True
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    integration = await async_get_integration(hass, DOMAIN)
-    fallback_version = integration.version if integration and integration.version else "1.0"
-    
-    def get_file_version(file_name: str, fallback: str) -> str:
-        try:
-            file_path = hass.config.path("custom_components", DOMAIN, UI_DIR_PATH, file_name)
-            st = os.stat(file_path)
-            with open(file_path, "rb") as file_obj:
-                digest = hashlib.sha256(file_obj.read()).hexdigest()[:12]
-            return f"{fallback}-{int(st.st_mtime)}-{st.st_size}-{digest}"
-        except Exception:
-            return fallback
-
-    ver_card = await hass.async_add_executor_job(
-        get_file_version, "shopping-history-card.js", fallback_version
+    warranty_months = int(data["warranty_months"])
+    warranty_end = (
+        _add_months(purchase_date, warranty_months).isoformat()
+        if warranty_months > 0
+        else ""
     )
 
-    await init_resource(hass, f"{UI_URL_BASE}/shopping-history-card.js", ver_card)
+    return {
+        "ngay_mua": purchase_date.isoformat(),
+        "nam": purchase_date.year,
+        "thang": purchase_date.month,
+        "ngay": purchase_date.day,
+        "ten_hang": data["name"].strip(),
+        "noi_mua": data["place"].strip(),
+        "so_luong": quantity,
+        "don_gia": price,
+        "thanh_tien": pre_tax,
+        "vat_percent": vat_percent,
+        "tien_vat": vat_amount,
+        "thanh_tien_sau_vat": post_tax,
+        "model": data["model"].strip(),
+        "tinh_trang": data["status"].strip(),
+        "nganh_hang": data["category"].strip(),
+        "hang_sx": data["manufacturer"].strip(),
+        "thoi_gian_bh_thang": warranty_months,
+        "ngay_het_bh": warranty_end,
+        "ghi_chu": data.get("note", "").strip(),
+    }
 
-    storage_dir = hass.config.path("shopping_history")
-    
-    def create_dir():
-        os.makedirs(storage_dir, exist_ok=True)
-    await hass.async_add_executor_job(create_dir)
 
-    db_path = os.path.join(storage_dir, f"shopping_data_{entry.entry_id}.db")
-    
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"db_path": db_path}
+def _get_store(hass: HomeAssistant, entry_id: str) -> ShoppingHistoryStore:
+    """Resolve a loaded Shopping History config entry to its store."""
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.domain != DOMAIN or entry.runtime_data is None:
+        raise HomeAssistantError(
+            "Không tìm thấy hồ sơ Shopping History đang hoạt động"
+        )
+    return entry.runtime_data.store
 
-    def init_db():
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS purchases (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ngay_mua TEXT,
-                nam INTEGER, thang INTEGER, ngay INTEGER,
-                ten_hang TEXT,
-                noi_mua TEXT,
-                so_luong REAL,
-                don_gia REAL,
-                thanh_tien REAL,
-                vat_percent REAL,
-                tien_vat REAL,
-                thanh_tien_sau_vat REAL,
-                model TEXT,
-                tinh_trang TEXT,
-                nganh_hang TEXT,
-                hang_sx TEXT,
-                thoi_gian_bh_thang INTEGER,
-                ngay_het_bh TEXT,
-                ghi_chu TEXT
+
+async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
+    """Hash and register the frontend resource outside config-entry setup."""
+    try:
+        integration = await async_get_integration(hass, DOMAIN)
+        fallback_version = integration.version or "1.0"
+
+        def _get_file_version() -> str:
+            file_path = hass.config.path(
+                "custom_components", DOMAIN, UI_DIR_PATH, "shopping-history-card.js"
             )
-        """)
-        
+            try:
+                stat = os.stat(file_path)
+                with open(file_path, "rb") as file_obj:
+                    digest = hashlib.sha256(file_obj.read()).hexdigest()[:12]
+                return (
+                    f"{fallback_version}-{int(stat.st_mtime)}-"
+                    f"{stat.st_size}-{digest}"
+                )
+            except OSError:
+                return fallback_version
+
+        version = await hass.async_add_executor_job(_get_file_version)
+        add_extra_js_url(
+            hass, f"{UI_URL_BASE}/shopping-history-card.js?v={version}"
+        )
+    except Exception:
+        # The card is optional; frontend registration must never fail HA startup.
+        _LOGGER.exception("Unable to register Shopping History frontend resource")
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/get_data",
+        vol.Required("entry_id"): cv.string,
+        vol.Optional("year"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+async def websocket_get_data(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return purchase details to the card without putting them in entity state."""
+    try:
+        store = _get_store(hass, msg["entry_id"])
+        result = await hass.async_add_executor_job(
+            store.get_dashboard_data, msg.get("year")
+        )
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "entry_not_found", str(err))
+        return
+    except Exception as err:  # Keep websocket failures isolated from Home Assistant.
+        _LOGGER.exception("Failed to read Shopping History dashboard data")
+        connection.send_error(msg["id"], "read_failed", str(err))
+        return
+
+    connection.send_result(msg["id"], result)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up integration-level HTTP, WebSocket and service actions."""
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                UI_URL_BASE,
+                hass.config.path("custom_components", DOMAIN, UI_DIR_PATH),
+                False,
+            )
+        ]
+    )
+
+    websocket_api.async_register_command(hass, websocket_get_data)
+
+    async def handle_add_order(call: ServiceCall) -> None:
+        store = _get_store(hass, call.data["entry_id"])
+        order = _build_order(call.data)
+        await hass.async_add_executor_job(store.add_order, order)
+        async_dispatcher_send(
+            hass, f"{SIGNAL_UPDATE_SENSORS}_{call.data['entry_id']}"
+        )
+
+    async def handle_edit_order(call: ServiceCall) -> None:
+        store = _get_store(hass, call.data["entry_id"])
+        order = _build_order(call.data)
         try:
-            cursor.execute("PRAGMA table_info(purchases)")
-            columns = [info[1] for info in cursor.fetchall()]
-            if "noi_mua" not in columns:
-                cursor.execute("ALTER TABLE purchases ADD COLUMN noi_mua TEXT DEFAULT ''")
-            if "ghi_chu" not in columns:
-                cursor.execute("ALTER TABLE purchases ADD COLUMN ghi_chu TEXT DEFAULT ''")
-        except Exception as e:
-            _LOGGER.error(f"Migration Error: {e}")
-        
-        conn.commit()
-        conn.close()
+            await hass.async_add_executor_job(
+                store.edit_order, call.data["order_id"], order
+            )
+        except OrderNotFoundError as err:
+            raise HomeAssistantError("Không tìm thấy đơn hàng cần sửa") from err
+        async_dispatcher_send(
+            hass, f"{SIGNAL_UPDATE_SENSORS}_{call.data['entry_id']}"
+        )
 
-    await hass.async_add_executor_job(init_db)
+    async def handle_delete_order(call: ServiceCall) -> None:
+        store = _get_store(hass, call.data["entry_id"])
+        try:
+            await hass.async_add_executor_job(store.delete_order, call.data["order_id"])
+        except OrderNotFoundError as err:
+            raise HomeAssistantError("Không tìm thấy đơn hàng cần xóa") from err
+        async_dispatcher_send(
+            hass, f"{SIGNAL_UPDATE_SENSORS}_{call.data['entry_id']}"
+        )
 
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
-    entry.async_on_unload(entry.add_update_listener(update_listener))
-    
+    hass.services.async_register(
+        DOMAIN, "add_order", handle_add_order, schema=SERVICE_ADD_ORDER_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, "edit_order", handle_edit_order, schema=SERVICE_EDIT_ORDER_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, "delete_order", handle_delete_order, schema=SERVICE_DELETE_ORDER_SCHEMA
+    )
+
+    # Frontend registration is optional and must not hold up config-entry startup.
+    hass.async_create_background_task(
+        _async_register_frontend_resource(hass),
+        f"{DOMAIN}: register frontend resource",
+    )
     return True
 
-async def update_listener(hass: HomeAssistant, entry: ConfigEntry):
-    await hass.config_entries.async_reload(entry.entry_id)
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    if entry.entry_id in hass.data[DOMAIN]:
-        hass.data[DOMAIN].pop(entry.entry_id)
-    return await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ShoppingHistoryConfigEntry
+) -> bool:
+    """Set up Shopping History from a config entry."""
+    db_path = hass.config.path(
+        "shopping_history", f"shopping_data_{entry.entry_id}.db"
+    )
+    store = ShoppingHistoryStore(db_path)
+
+    # SQLite and filesystem work is intentionally off the event loop. Initialization
+    # only performs schema/index checks; purchase rows are not loaded during startup.
+    await hass.async_add_executor_job(store.initialize)
+    entry.runtime_data = ShoppingHistoryData(store=store)
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(
+    hass: HomeAssistant, entry: ShoppingHistoryConfigEntry
+) -> bool:
+    """Unload a config entry."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
