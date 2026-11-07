@@ -3,3 +3,5 @@
 DOMAIN = "shopping_history"
 CONF_FRIENDLY_NAME = "friendly_name"
 SIGNAL_UPDATE_SENSORS = "shopping_history_update_signal"
+
+CONF_YEARLY_SENSORS = "yearly_sensors"

@@ -1,4 +1,4 @@
-"""Sensor platform for Shopping History."""
+"""Event-driven, recorder-safe yearly shopping totals."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .const import DOMAIN, SIGNAL_UPDATE_SENSORS
 from .storage import ShoppingHistoryStore
 
 _LOGGER = logging.getLogger(__name__)
+_ZERO_SUMMARY = {"orders": 0, "quantity": 0.0, "total": 0}
 
 
 async def async_setup_entry(
@@ -23,58 +24,77 @@ async def async_setup_entry(
     entry: ShoppingHistoryConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up yearly Shopping History sensors."""
+    """Create all yearly sensors from one SQLite query at setup."""
     store = entry.runtime_data.store
-    known_years: set[int] = set()
+    sensors: dict[int, ShoppingYearlySensor] = {}
+    refresh_running = False
+    refresh_again = False
 
-    async def check_and_add_new_entities(*_args: Any) -> None:
-        """Create a yearly sensor only when a new purchase year appears."""
-        try:
-            db_years = await hass.async_add_executor_job(store.get_years)
-        except Exception:
-            _LOGGER.exception("Unable to read Shopping History years")
+    async def refresh() -> None:
+        nonlocal refresh_running, refresh_again
+        if refresh_running:
+            refresh_again = True
             return
+        refresh_running = True
+        try:
+            while True:
+                refresh_again = False
+                try:
+                    summaries, revision = await hass.async_add_executor_job(
+                        store.get_year_summaries
+                    )
+                except Exception:
+                    _LOGGER.exception("Shopping History: failed to refresh yearly sensors")
+                    return
 
-        new_entities: list[ShoppingYearlySensor] = []
-        for year in db_years:
-            if year in known_years:
-                continue
-            new_entities.append(ShoppingYearlySensor(store, entry, year))
-            known_years.add(year)
+                added: list[ShoppingYearlySensor] = []
+                for year, summary in summaries.items():
+                    if year not in sensors:
+                        entity = ShoppingYearlySensor(entry, year)
+                        sensors[year] = entity
+                        added.append(entity)
+                    sensors[year].apply_summary(summary)
 
-        if new_entities:
-            async_add_entities(new_entities, update_before_add=True)
+                # Keep a sensor at zero if the last purchase for that year was removed.
+                for year, entity in sensors.items():
+                    if year not in summaries:
+                        entity.apply_summary({**_ZERO_SUMMARY, "revision": revision})
+                    if entity.hass is not None and entity not in added:
+                        entity.async_write_ha_state()
 
-    await check_and_add_new_entities()
+                if added:
+                    async_add_entities(added, update_before_add=False)
+                    _LOGGER.debug("Shopping History created %s yearly sensors", len(added))
+                if not refresh_again:
+                    break
+        finally:
+            refresh_running = False
+
+    @callback
+    def schedule_refresh() -> None:
+        # Integration-level dispatch is a cheap signal: only the executor reads disk.
+        hass.async_create_task(refresh(), f"{DOMAIN}: refresh yearly sensors")
 
     entry.async_on_unload(
         async_dispatcher_connect(
-            hass,
-            f"{SIGNAL_UPDATE_SENSORS}_{entry.entry_id}",
-            check_and_add_new_entities,
+            hass, f"{SIGNAL_UPDATE_SENSORS}_{entry.entry_id}", schedule_refresh
         )
     )
+    await refresh()
 
 
 class ShoppingYearlySensor(SensorEntity):
-    """Recorder-safe yearly purchase total sensor."""
+    """Compact yearly aggregate, with no purchase details in Recorder."""
 
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_state_class = SensorStateClass.TOTAL
-    # Keep the historic unit exactly as recorded by existing installations. We do not
-    # declare MONETARY because current HA documents that device class as ISO-4217 only.
+    # Preserve historic unit for existing charts and Recorder statistics.
     _attr_native_unit_of_measurement = "đ"
     _attr_suggested_display_precision = 0
     _attr_icon = "mdi:calendar-range"
 
-    def __init__(
-        self,
-        store: ShoppingHistoryStore,
-        entry: ShoppingHistoryConfigEntry,
-        year: int,
-    ) -> None:
-        self._store = store
+    def __init__(self, entry: ShoppingHistoryConfigEntry, year: int) -> None:
         self._entry_id = entry.entry_id
         self._year = year
         self._attr_name = f"Năm {year}"
@@ -86,16 +106,11 @@ class ShoppingYearlySensor(SensorEntity):
             model="Local purchase database",
         )
         self._attr_native_value = 0
-        self._summary: dict[str, int | float] = {
-            "orders": 0,
-            "quantity": 0,
-            "total": 0,
-            "revision": 0,
-        }
+        self._summary: dict[str, int | float] = {**_ZERO_SUMMARY, "revision": 0}
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose only compact aggregates; purchase rows are served via WebSocket."""
+        """Only small aggregates to avoid bloating Recorder."""
         return {
             "shopping_history": True,
             "config_entry_id": self._entry_id,
@@ -106,31 +121,8 @@ class ShoppingYearlySensor(SensorEntity):
             "data_revision": self._summary["revision"],
         }
 
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to explicit database changes."""
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass,
-                f"{SIGNAL_UPDATE_SENSORS}_{self._entry_id}",
-                self._schedule_refresh,
-            )
-        )
-
     @callback
-    def _schedule_refresh(self, *_args: Any) -> None:
-        """Refresh this entity after a purchase mutation."""
-        self.async_schedule_update_ha_state(force_refresh=True)
-
-    async def async_update(self) -> None:
-        """Refresh small aggregate values without polling purchase details."""
-        try:
-            summary = await self.hass.async_add_executor_job(
-                self._store.get_year_summary, self._year
-            )
-        except Exception:
-            _LOGGER.exception("Shopping History yearly sensor update failed")
-            return
-
+    def apply_summary(self, summary: dict[str, int | float]) -> None:
+        """Update entity state using an already aggregated summary."""
         self._summary = summary
         self._attr_native_value = int(summary["total"])

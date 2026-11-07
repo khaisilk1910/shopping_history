@@ -7,9 +7,15 @@ these methods in the executor so SQLite and filesystem I/O never block the event
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 import sqlite3
 from typing import Any
+
+
+def _round_vnd(value: float) -> int:
+    """Match the card's Math.round semantics for non-negative currency totals."""
+    return int(Decimal(str(value)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
 
 class ShoppingHistoryStorageError(Exception):
@@ -96,6 +102,8 @@ class ShoppingHistoryStore:
                     "INSERT OR IGNORE INTO shopping_meta(key, value) VALUES('revision', 0)"
                 )
 
+                # Mark the revision-tracked schema; existing legacy rows remain intact.
+                conn.execute("PRAGMA user_version = 1")
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_purchases_nam ON purchases(nam)"
                 )
@@ -118,6 +126,58 @@ class ShoppingHistoryStore:
         conn.execute(
             "UPDATE shopping_meta SET value = value + 1 WHERE key = 'revision'"
         )
+
+    def get_year_summaries(self) -> tuple[dict[int, dict[str, int | float]], int]:
+        """Compute every year's summary with one indexed SQLite aggregation.
+
+        Used by the sensor platform so startup/updates use one executor query
+        rather than one SQLite connection and SELECT per sensor.
+        """
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            revision_row = conn.execute(
+                "SELECT value FROM shopping_meta WHERE key = 'revision'"
+            ).fetchone()
+            revision = int(revision_row[0] if revision_row else 0)
+            rows = conn.execute(
+                """
+                SELECT nam, COUNT(*) AS orders,
+                    COALESCE(SUM(so_luong), 0) AS quantity,
+                    COALESCE(SUM(thanh_tien_sau_vat), 0) AS total
+                FROM purchases WHERE nam IS NOT NULL
+                GROUP BY nam ORDER BY nam DESC
+                """
+            ).fetchall()
+            summaries = {
+                int(row["nam"]): {
+                    "orders": int(row["orders"]),
+                    "quantity": float(row["quantity"]),
+                    "total": _round_vnd(float(row["total"])),
+                    "revision": revision,
+                }
+                for row in rows
+            }
+            return summaries, revision
+        finally:
+            conn.close()
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Minimal health information without any purchase rows or names."""
+        conn = self._connect()
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM purchases").fetchone()[0]
+            revision = conn.execute(
+                "SELECT value FROM shopping_meta WHERE key = 'revision'"
+            ).fetchone()
+            return {
+                "schema_version": int(conn.execute("PRAGMA user_version").fetchone()[0]),
+                "journal_mode": str(conn.execute("PRAGMA journal_mode").fetchone()[0]),
+                "purchase_count": int(count),
+                "revision": int(revision[0] if revision else 0),
+            }
+        finally:
+            conn.close()
 
     def get_years(self) -> list[int]:
         """Return years that contain purchases."""
@@ -156,7 +216,7 @@ class ShoppingHistoryStore:
             return {
                 "orders": int(row["orders"] if row else 0),
                 "quantity": float(row["quantity"] if row else 0),
-                "total": int(round(float(row["total"] if row else 0))),
+                "total": _round_vnd(float(row["total"] if row else 0)),
                 "revision": int(revision_row[0] if revision_row else 0),
             }
         finally:
@@ -183,20 +243,26 @@ class ShoppingHistoryStore:
         finally:
             conn.close()
 
-    def get_dashboard_data(self, year: int | None = None) -> dict[str, Any]:
-        """Return dashboard data over Home Assistant's WebSocket API."""
+    def get_dashboard_data(
+        self, year: int | None = None, if_revision: int | None = None
+    ) -> dict[str, Any]:
+        """Return consistent data or a light no-change response for the card."""
         conn = self._connect()
         try:
+            # A read transaction pins both revision and rows to one snapshot.
+            conn.execute("BEGIN")
+            revision_row = conn.execute(
+                "SELECT value FROM shopping_meta WHERE key = 'revision'"
+            ).fetchone()
+            revision = int(revision_row[0] if revision_row else 0)
+            if if_revision is not None and revision == if_revision:
+                return {"revision": revision, "unchanged": True}
             years = [
                 int(row[0])
                 for row in conn.execute(
-                    """
-                    SELECT DISTINCT nam
-                    FROM purchases
-                    WHERE nam IS NOT NULL
-                    ORDER BY nam DESC
-                    """
-                ).fetchall()
+                    """SELECT DISTINCT nam FROM purchases
+                    WHERE nam IS NOT NULL ORDER BY nam DESC"""
+                )
             ]
             if year is None:
                 rows = conn.execute(
@@ -204,19 +270,13 @@ class ShoppingHistoryStore:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """
-                    SELECT * FROM purchases
-                    WHERE nam = ?
-                    ORDER BY ngay_mua DESC, id DESC
-                    """,
+                    """SELECT * FROM purchases WHERE nam = ?
+                    ORDER BY ngay_mua DESC, id DESC""",
                     (year,),
                 ).fetchall()
-            revision_row = conn.execute(
-                "SELECT value FROM shopping_meta WHERE key = 'revision'"
-            ).fetchone()
             return {
                 "years": years,
-                "revision": int(revision_row[0] if revision_row else 0),
+                "revision": revision,
                 "items": [self._row_to_dict(row) for row in rows],
             }
         finally:

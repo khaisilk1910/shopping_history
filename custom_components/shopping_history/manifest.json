@@ -1,15 +1,22 @@
 {
   "domain": "shopping_history",
   "name": "Lịch Sử Mua Hàng",
-  "version": "2026.09.07",
+  "version": "2026.11.7",
   "documentation": "https://github.com/khaisilk1910/shopping_history",
   "dependencies": [
-    "frontend"
+    "frontend",
+    "http",
+    "lovelace"
   ],
   "codeowners": [
     "@khaisilk1910"
   ],
   "iot_class": "local_push",
   "config_flow": true,
-  "requirements": []
+  "requirements": [],
+  "issue_tracker": "https://github.com/khaisilk1910/shopping_history/issues",
+  "categories": [
+    "productivity_information.shopping_groceries",
+    "finance"
+  ]
 }

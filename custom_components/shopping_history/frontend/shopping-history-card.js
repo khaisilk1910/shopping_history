@@ -1,10 +1,10 @@
 (function() {
   'use strict';
 
-  const SHOPPING_HISTORY_CARD_VERSION = '2026.09.07-recorder-safe-websocket-data';
+  const SHOPPING_HISTORY_CARD_VERSION = '2026.11.7-marketplace';
 
   // --- HÀM TIỆN ÍCH CHUNG ---
-  const esc = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  const esc = (str) => String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const formatMoney = (val) => new Intl.NumberFormat('vi-VN').format(Math.round(val || 0));
   const formatNumber = (val) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(val || 0);
   const formatDate = (dateString) => {
@@ -32,7 +32,9 @@
   class ShoppingHistoryEditor extends HTMLElement {
     constructor() {
       super();
-      this._config = {}; 
+      this._config = {};
+      this._backendProfiles = null;
+      this._profileLookupPending = false;
     }
 
     setConfig(config) {
@@ -47,6 +49,16 @@
         this._rendered = true;
       } else {
         this.refreshDefaultProfileOptions();
+      }
+      if (!this._profileLookupPending && !this._backendProfiles && typeof hass.callWS === 'function') {
+        this._profileLookupPending = true;
+        hass.callWS({ type: 'shopping_history/list_profiles' }).then(profiles => {
+          if (!Array.isArray(profiles)) return;
+          this._backendProfiles = profiles;
+          this.refreshDefaultProfileOptions();
+        }).catch(err => {
+          console.debug('[ShoppingHistory] Profile editor API unavailable:', err);
+        }).finally(() => { this._profileLookupPending = false; });
       }
     }
 
@@ -68,6 +80,13 @@
     }
 
     getAvailableProfilesForEditor() {
+      if (Array.isArray(this._backendProfiles)) {
+        return this._backendProfiles.map(profile => ({
+          id: profile.entry_id,
+          name: profile.title || profile.entry_id,
+          aliases: [profile.entry_id, profile.title].filter(Boolean)
+        })).sort((a, b) => a.name.localeCompare(b.name));
+      }
       const states = this._hass && this._hass.states ? this._hass.states : {};
       const tempGroups = {};
 
@@ -201,7 +220,7 @@
         </style>
 
         <div class="editor-container">
-          <div class="section"><div class="section-title no-collapse"><div class="title-left">⚙️ Cài đặt chung</div></div><div class="section-content"><div class="row-col"><span class="label">Tiêu đề thẻ</span><input type="text" id="title-input" class="custom-input config-trigger" value="${currentTitle}"></div><div class="row-col"><span class="label">Icon</span><input type="text" id="icon-input" class="custom-input config-trigger" value="${currentIcon}"></div><div class="row-col"><span class="label">Profile mặc định khi mở thẻ</span><select id="default_profile_id" class="custom-input config-trigger">${this.getDefaultProfileOptionsHTML()}</select><span style="font-size:12px; opacity:0.7; line-height:1.4;">Chọn profile sẽ hiển thị tự động khi thẻ được mở lần đầu.</span></div><div class="row"><span class="label">Chiều cao thẻ (px)</span><input type="range" id="card_height" class="config-trigger" min="600" max="1000" step="50"><span class="val-badge" id="card_height_val"></span></div></div></div>
+          <div class="section"><div class="section-title no-collapse"><div class="title-left">⚙️ Cài đặt chung</div></div><div class="section-content"><div class="row-col"><span class="label">Tiêu đề thẻ</span><input type="text" id="title-input" class="custom-input config-trigger" value="${esc(currentTitle)}"></div><div class="row-col"><span class="label">Icon</span><input type="text" id="icon-input" class="custom-input config-trigger" value="${esc(currentIcon)}"></div><div class="row-col"><span class="label">Profile mặc định khi mở thẻ</span><select id="default_profile_id" class="custom-input config-trigger">${this.getDefaultProfileOptionsHTML()}</select><span style="font-size:12px; opacity:0.7; line-height:1.4;">Chọn profile sẽ hiển thị tự động khi thẻ được mở lần đầu.</span></div><div class="row"><span class="label">Chiều cao thẻ (px)</span><input type="range" id="card_height" class="config-trigger" min="600" max="1000" step="50"><span class="val-badge" id="card_height_val"></span></div></div></div>
           <div class="section"><div class="section-title"><div class="title-left">🎨 Nền (Background)</div><span class="section-icon">▼</span></div><div class="section-content"><div class="row"><span class="label">Loại nền</span><select id="bg_type" class="ha-select config-trigger"><option value="solid">Màu đơn sắc (Solid)</option><option value="gradient">Màu dải (Gradient)</option></select></div><div class="row"><span class="label">Độ trong suốt (%)</span><input type="range" id="bg_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="bg_opacity_val"></span></div><div id="solid_settings" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;"><div class="row"><span class="label">Màu nền</span><div class="input-group"><input type="color" id="bg_color" class="config-trigger"><span class="val-badge" id="bg_color_val"></span></div></div></div><div id="gradient_settings" style="display:none;"><div class="row" style="margin-top: 16px; border-top: 1px dashed var(--divider-color, #e0e0e0); padding-top: 16px;"><span class="label">Mẫu Gradient</span><select id="bg_gradient_preset" class="ha-select config-trigger"><option value="linear-gradient(135deg, #f0f4f8, #d9e2ec)">☀️ Sáng mặc định</option><option value="linear-gradient(135deg, #1e293b, #0f172a)">🌙 Tối mặc định</option><option value="linear-gradient(135deg, #141e30, #243b55)">🌌 Royal Night</option><option value="linear-gradient(135deg, #0f2027, #203a43, #2c5364)">🌊 Deep Ocean</option><option value="linear-gradient(135deg, #232526, #414345)">🏙️ Midnight City</option><option value="custom">✍️ Tùy chỉnh (Custom)</option></select></div><div id="custom_gradient_row" style="display:none; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--divider-color, #e0e0e0);"><div class="row" style="width:100%;"><span class="label">Màu 1</span><div class="input-group"><input type="color" id="bg_gradient_color1" class="config-trigger"><span class="val-badge" id="bg_gradient_color1_val"></span></div></div><div class="row" style="width:100%;"><span class="label">Màu 2</span><div class="input-group"><input type="color" id="bg_gradient_color2" class="config-trigger"><span class="val-badge" id="bg_gradient_color2_val"></span></div></div><div class="row" style="width:100%;"><span class="label">Góc độ (°)</span><input type="range" id="bg_gradient_angle" class="config-trigger" min="0" max="360" step="1"><span class="val-badge" id="bg_gradient_angle_val"></span></div></div></div></div></div>
           <div class="section collapsed"><div class="section-title"><div class="title-left">🖋️ Nội dung & Màu sắc</div><div class="title-right"><input type="checkbox" id="auto_contrast" class="config-trigger" title="Tự động tương phản"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="custom_colors_settings"><div class="row"><span class="label">Màu chữ</span><div class="input-group"><input type="color" id="textColor" class="config-trigger"><span class="val-badge" id="textColor_val"></span></div></div><div class="row"><span class="label">Màu Nhấn</span><div class="input-group"><input type="color" id="accentColor" class="config-trigger"><span class="val-badge" id="accentColor_val"></span></div></div><div class="row"><span class="label">Màu Tiền</span><div class="input-group"><input type="color" id="moneyColor" class="config-trigger"><span class="val-badge" id="moneyColor_val"></span></div></div><div class="row"><span class="label">Màu Nền khối</span><div class="input-group"><input type="color" id="blockBg" class="config-trigger"><span class="val-badge" id="blockBg_val"></span></div></div></div></div></div>
           <div class="section collapsed"><div class="section-title"><div class="title-left">🔲 Viền (Border)</div><div class="title-right"><input type="checkbox" id="border_enable" class="config-trigger"><span class="section-icon">▼</span></div></div><div class="section-content"><div id="border_settings"><div class="row"><span class="label">Màu viền</span><div class="input-group"><input type="color" id="border_color" class="config-trigger"><span class="val-badge" id="border_color_val"></span></div></div><div class="row"><span class="label">Độ dày (px)</span><input type="range" id="border_width" class="config-trigger" min="0" max="10" step="1"><span class="val-badge" id="border_width_val"></span></div><div class="row"><span class="label">Trong suốt (%)</span><input type="range" id="border_opacity" class="config-trigger" min="0" max="100"><span class="val-badge" id="border_opacity_val"></span></div></div></div></div>
@@ -390,8 +409,10 @@
 
     getCardSize() { return Math.ceil((this._config && this._config.card_height ? this._config.card_height : 600) / 50); }
     getGridOptions() {
-      const h = this._config && this._config.card_height ? this._config.card_height : 600;
-      return { columns: 12, rows: Math.ceil(h / 50), min_columns: 4, min_rows: 8 };
+      // Home Assistant Sections: 56px per row + 8px gap (not 50px).
+      const height = Number(this._config?.card_height) || 600;
+      const rows = Math.max(6, Math.min(25, Math.ceil((height + 8) / 64)));
+      return { columns: 12, rows, min_columns: 6, max_columns: 12, min_rows: 6, max_rows: 25 };
     }
 
     constructor() {
@@ -427,7 +448,6 @@
       this._searchPage = 1;
       this._warrantyPage = 1;
 
-      this._entryIds = {};
 
       this._uniqueCategories = new Set();
       this._uniquePlaces = new Set();
@@ -437,8 +457,6 @@
       this._itemToDelete = null;
       this._editingOrder = null;
 
-      this._configEntriesMap = {};
-      this._entityRegistryMap = {};
       this._isScanning = false;
       this._trackedEntities = [];
       this._isError = false;
@@ -447,7 +465,7 @@
       this._listenersAttached = false;
       this._scanScheduled = null;
       this._scanRetryCount = 0;
-      this._maxScanRetries = 40;
+      this._maxScanRetries = 6;
       this._scanAgainAfterCurrent = false;
       this._scanGeneration = 0;
       this._resumeHandler = null;
@@ -459,6 +477,11 @@
       this._lastLoadingSignature = '';
       this._hasRenderedContent = false;
       this._hasRealData = false;
+      this._unsubscribeUpdates = null;
+      this._subscribePromise = null;
+      this._subscriptionConnection = null;
+      this._subscriptionGeneration = 0;
+      this._mutationInProgress = false;
 
       try {
           this._ensureCardShell();
@@ -488,13 +511,23 @@
               window.addEventListener('connection-changed', this._resumeHandler);
           }
 
-          if (this._hass && !this._hasRealData) this.scheduleFullScan(250, { force: true, reason: 'connected' });
+          if (this._hass) {
+              this.subscribeToUpdates();
+              if (!this._hasRealData) this.scheduleFullScan(250, { reason: 'connected' });
+          }
       } catch (err) {
           console.error("[ShoppingHistory] connectedCallback error:", err);
       }
     }
 
     disconnectedCallback() {
+      this._subscriptionGeneration += 1;
+      if (this._unsubscribeUpdates) {
+          this._unsubscribeUpdates();
+          this._unsubscribeUpdates = null;
+      }
+      this._subscriptionConnection = null;
+      this._subscribePromise = null;
       if (this._scanScheduled) {
           clearTimeout(this._scanScheduled);
           this._scanScheduled = null;
@@ -510,6 +543,38 @@
           window.removeEventListener('connection-changed', this._resumeHandler);
           this._resumeHandler = null;
       }
+    }
+
+    subscribeToUpdates() {
+      const connection = this._hass?.connection;
+      if (!this.isConnected || !connection || typeof connection.subscribeMessage !== 'function') return;
+      if (this._subscriptionConnection === connection) return;
+      if (this._unsubscribeUpdates) {
+          this._unsubscribeUpdates();
+          this._unsubscribeUpdates = null;
+      }
+      this._subscriptionConnection = connection;
+      const generation = ++this._subscriptionGeneration;
+      this._subscribePromise = connection.subscribeMessage(event => {
+          if (!this.isConnected) return;
+          // Only refresh this card for the profile that actually changed.
+          if (!event?.entry_id || event.entry_id === this._currentProfileId) {
+              this.scheduleFullScan(120, { reason: 'database-updated' });
+          }
+      }, { type: 'shopping_history/subscribe_updates' }).then(unsubscribe => {
+          if (generation !== this._subscriptionGeneration || !this.isConnected) {
+              unsubscribe();
+              return;
+          }
+          this._unsubscribeUpdates = unsubscribe;
+      }).catch(err => {
+          if (generation === this._subscriptionGeneration) {
+              this._subscriptionConnection = null;
+              console.warn('[ShoppingHistory] Cannot subscribe to updates:', err);
+          }
+      }).finally(() => {
+          if (generation === this._subscriptionGeneration) this._subscribePromise = null;
+      });
     }
 
     _ensureCardShell() {
@@ -582,14 +647,12 @@
     }
 
     isHassConnectionRefreshed(oldHass, newHass) {
+      // An empty/failed load is not evidence that the WebSocket connection changed.
+      // The internal retry loop handles failures; otherwise every HA state update
+      // could reset the debounce timer and starve the first successful load.
       if (!oldHass) return true;
-      if (this._isError || !this._trackedEntities || this._trackedEntities.length === 0 || !this._currentProfileId) return true;
-      if (oldHass.connection && newHass.connection && oldHass.connection !== newHass.connection) return true;
-      if (oldHass.connected === false && newHass.connected !== false) return true;
-
-      const oldCount = oldHass.states ? Object.keys(oldHass.states).length : 0;
-      const newCount = newHass.states ? Object.keys(newHass.states).length : 0;
-      return oldCount !== newCount;
+      if (oldHass.connection !== newHass.connection) return true;
+      return oldHass.connected === false && newHass.connected !== false;
     }
 
     async withTimeout(promise, timeoutMs, label) {
@@ -623,14 +686,18 @@
     async loadProfileItems(profileId) {
       if (!profileId || !this._profilesData || !this._profilesData[profileId]) return;
 
-      const result = await this.callWSWithTimeout({
-          type: 'shopping_history/get_data',
-          entry_id: profileId
-      });
-
       const profile = this._profilesData[profileId];
-      profile.items = result && Array.isArray(result.items) ? result.items : [];
-      profile.revision = result && result.revision !== undefined ? result.revision : 0;
+      const payload = { type: 'shopping_history/get_data', entry_id: profileId };
+      if (Array.isArray(profile.items) && Number.isInteger(profile.revision)) {
+          payload.if_revision = profile.revision;
+      }
+      const result = await this.callWSWithTimeout(payload);
+      if (result?.unchanged === true && Array.isArray(profile.items)) return;
+      if (!result || !Array.isArray(result.items)) {
+          throw new Error('Home Assistant trả dữ liệu đơn hàng không hợp lệ');
+      }
+      profile.items = result.items;
+      profile.revision = Number.isInteger(result.revision) ? result.revision : 0;
 
       if (result && Array.isArray(result.years)) {
           const years = result.years
@@ -792,8 +859,14 @@
 
     setConfig(config) {
       // BẢO VỆ 3: Ném lỗi chuẩn để HA biết cấu hình sai thay vì crash ngầm
-      if (!config) {
-          throw new Error("Lỗi: Không tìm thấy cấu hình thẻ!");
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+          throw new Error('Cấu hình thẻ Shopping History không hợp lệ');
+      }
+      if (config.card_height !== undefined && (
+          !Number.isFinite(Number(config.card_height)) ||
+          Number(config.card_height) < 300 || Number(config.card_height) > 1600
+      )) {
+          throw new Error('card_height phải nằm trong khoảng 300–1600 px');
       }
       
       try {
@@ -827,42 +900,31 @@
 
     set hass(hass) {
       try {
-          this._ensureCardShell();
           if (!hass || !hass.states) return;
           const oldHass = this._hass;
           this._hass = hass;
+          this._ensureCardShell();
+          this.subscribeToUpdates();
 
           if (!oldHass) {
-              this.scheduleFullScan(250, { force: true, reason: 'first-hass' });
+              this.scheduleFullScan(200, { reason: 'first-hass' });
               return;
           }
 
           const forceRescan = this.isHassConnectionRefreshed(oldHass, hass);
-
-          if (this._isScanning) {
-              if (forceRescan) {
-                  this.scheduleFullScan(300, { force: true, reason: 'hass-refreshed-while-scanning' });
-              } else {
-                  this._scanAgainAfterCurrent = true;
-              }
-              return;
+          let shouldUpdate = forceRescan;
+          if (!shouldUpdate) {
+              shouldUpdate = this._trackedEntities.some(
+                  entityId => oldHass.states[entityId] !== hass.states[entityId]
+              );
           }
-          
-          let shouldUpdate = forceRescan || !this._trackedEntities || this._trackedEntities.length === 0 || !this._currentProfileId;
-          if (!shouldUpdate && this._trackedEntities && this._trackedEntities.length > 0) {
-              for (let eid of this._trackedEntities) {
-                  if (oldHass.states[eid] !== hass.states[eid]) {
-                      shouldUpdate = true;
-                      break;
-                  }
-              }
-          }
-
           if (shouldUpdate) {
-              this.scheduleFullScan(forceRescan ? 50 : 150, { force: forceRescan, reason: forceRescan ? 'hass-refreshed' : 'state-updated' });
+              this.scheduleFullScan(forceRescan ? 250 : 150, {
+                  reason: forceRescan ? 'hass-reconnected' : 'sensor-updated'
+              });
           }
       } catch (err) {
-          console.error("Shopping History: Error in set hass", err);
+          console.error('[ShoppingHistory] Home Assistant state update failed:', err);
       }
     }
 
@@ -887,184 +949,79 @@
     }
 
     async performFullScan(options = {}) {
-      const { force = false } = options;
       this._ensureCardShell();
-      if (!this._hass || !this._hass.states) return;
-      if (this._isScanning && !force) {
+      if (!this.isConnected || !this._hass?.states) return;
+      // Never run overlapping WebSocket scans. Queue one follow-up at most.
+      if (this._isScanning) {
           this._scanAgainAfterCurrent = true;
           return;
       }
-
-      const scanId = ++this._scanGeneration;
       this._isScanning = true;
+      const generation = ++this._scanGeneration;
       this._isError = false;
 
       try {
-          const activeHass = this._hass;
-          let shoppingEntries = [];
-          try {
-              const [entriesResult, entitiesResult] = await Promise.allSettled([
-                  this.callWSWithTimeout({ type: 'config_entries/get' }),
-                  this.callWSWithTimeout({ type: 'config/entity_registry/list' })
-              ]);
+          // One tiny public integration WebSocket command replaces the two
+          // admin-only config_entries/entity_registry full database scans.
+          const entries = await this.callWSWithTimeout({
+              type: 'shopping_history/list_profiles'
+          });
+          if (!Array.isArray(entries)) throw new Error('Danh sách hồ sơ không hợp lệ');
+          if (!this.isConnected || generation !== this._scanGeneration) return;
 
-              if (scanId !== this._scanGeneration) return;
-
-              this._configEntriesMap = {};
-              if (entriesResult.status === 'fulfilled' && Array.isArray(entriesResult.value)) {
-                  shoppingEntries = entriesResult.value.filter(e => e && e.domain === 'shopping_history');
-                  shoppingEntries.forEach(e => { this._configEntriesMap[e.entry_id] = e.title; });
-              }
-
-              this._entityRegistryMap = {};
-              if (entitiesResult.status === 'fulfilled' && Array.isArray(entitiesResult.value)) {
-                  entitiesResult.value.forEach(ent => {
-                      if (ent && ent.entity_id) this._entityRegistryMap[ent.entity_id] = ent.config_entry_id;
-                  });
-              }
-
-              if (entriesResult.status === 'rejected' || entitiesResult.status === 'rejected') {
-                  console.warn("Shopping History: callWS fallback.", entriesResult.reason || entitiesResult.reason);
-              }
-          } catch (wsErr) {
-              console.warn("Shopping History: callWS fallback.", wsErr);
-          }
-
-          if (scanId !== this._scanGeneration) return;
-          const states = (activeHass && activeHass.states) ? activeHass.states : (this._hass && this._hass.states ? this._hass.states : {});
-          const yearSensors = Object.keys(states).filter(eid =>
-            eid.startsWith('sensor.') &&
-            states[eid] &&
-            states[eid].attributes &&
-            states[eid].attributes.nam !== undefined &&
-            (states[eid].attributes.shopping_history === true ||
-             states[eid].attributes.danh_sach_chi_tiet !== undefined)
-          );
-
-          this._trackedEntities = yearSensors;
-
-          if (yearSensors.length === 0) {
-              if (this._scanRetryCount < this._maxScanRetries) {
-                  this._scanRetryCount += 1;
-                  const retryDelay = Math.min(1000 * this._scanRetryCount, 5000);
-                  this.renderHeaderAndTabs();
-                  // Nếu đã có bảng cũ, giữ nguyên màn hình hiện tại trong lúc mạng/WebSocket đang ổn định lại.
-                  // Việc này tránh nháy từ bảng -> loading -> bảng khi mở trang hoặc đổi mạng.
-                  if (!this._hasRenderedContent) {
-                      this.renderLoading('Đang chờ dữ liệu Shopping History...');
-                  }
-                  this.scheduleFullScan(retryDelay, { reason: 'wait-data' });
-              } else {
-                  this.renderHeaderAndTabs();
-                  this.renderContent();
-              }
-              return;
-          }
-
+          const previousProfiles = this._profilesData || {};
+          // WebSocket change notifications replace scanning the whole HA state
+          // registry. A dashboard refresh is now independent of entity count.
+          this._trackedEntities = [];
+          const nextProfiles = {};
+          const list = [];
+          entries.forEach(entry => {
+              if (!entry?.entry_id) return;
+              const id = String(entry.entry_id);
+              const title = String(entry.title || id);
+              const oldProfile = previousProfiles[id];
+              const profile = {
+                  id, name: title,
+                  years: oldProfile?.years || new Set(),
+                  map: oldProfile?.map || {},
+                  items: oldProfile?.items,
+                  revision: oldProfile?.revision,
+                  aliases: [id, title, ...(oldProfile?.aliases || [])]
+              };
+              nextProfiles[id] = profile;
+              list.push(profile);
+          });
+          list.sort((a, b) => a.name.localeCompare(b.name));
+          this._profilesData = nextProfiles;
+          this._profileList = list;
           this._scanRetryCount = 0;
-          this._hasRealData = true;
+          this._hasRealData = true; // An empty database is valid, not a load failure.
 
-          this._uniqueCategories.clear();
-          this._uniquePlaces.clear();
-          this._uniqueManufacturers.clear();
-
-          const tempGroups = {};
-
-          shoppingEntries.forEach(e => {
-              tempGroups[e.entry_id] = { years: new Set(), map: {}, displayNames: [e.title] };
+          this.applyDefaultProfileSelection({
+              force: options.forceDefault === true ||
+                  options.reason === 'config-default-profile-changed'
           });
-
-          yearSensors.forEach(eid => {
-            try {
-                const state = states[eid];
-                const attrs = state.attributes || {};
-                const y = parseInt(attrs.nam);
-                
-                if (attrs.danh_sach_chi_tiet) {
-                    attrs.danh_sach_chi_tiet.forEach(item => {
-                        if (item.nganh_hang) this._uniqueCategories.add(String(item.nganh_hang).trim());
-                        if (item.noi_mua) this._uniquePlaces.add(String(item.noi_mua).trim());
-                        if (item.hang_sx) this._uniqueManufacturers.add(String(item.hang_sx).trim());
-                    });
-                }
-                
-                if (!isNaN(y)) {
-                    let groupId = this._entityRegistryMap[eid] || 
-                                  (activeHass.entities && activeHass.entities[eid] ? activeHass.entities[eid].config_entry_id : null) ||
-                                  (this._hass.entities && this._hass.entities[eid] ? this._hass.entities[eid].config_entry_id : null) ||
-                                  attrs.config_entry_id;
-
-                    if (!groupId) {
-                        let baseName = attrs.friendly_name || eid;
-                        groupId = String(baseName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-                    }
-
-                    if (!tempGroups[groupId]) { 
-                        tempGroups[groupId] = { years: new Set(), map: {}, displayNames: [] }; 
-                    }
-                    tempGroups[groupId].years.add(y);
-                    tempGroups[groupId].map[y] = eid;
-                    
-                    let pName = attrs.friendly_name || eid;
-                    pName = String(pName).replace(/\s*(?:Năm|Year|-|_)?\s*\d{4}$/i, '').trim();
-                    tempGroups[groupId].displayNames.push(pName);
-                }
-            } catch (e) {
-                console.warn("Lỗi xử lý entity:", eid, e);
-            }
-          });
-
-          this._profilesData = {};
-          this._profileList = [];
-
-          Object.keys(tempGroups).forEach(gId => {
-              const group = tempGroups[gId];
-              let finalName = this._configEntriesMap[gId];
-              
-              if (!finalName) {
-                  if (group.displayNames.length > 0) {
-                      const nameCounts = group.displayNames.reduce((acc, name) => {
-                          acc[name] = (acc[name] || 0) + 1;
-                          return acc;
-                      }, {});
-                      finalName = Object.keys(nameCounts).reduce((a, b) => nameCounts[a] > nameCounts[b] ? a : b);
-                  }
-              }
-              if (!finalName) finalName = gId; 
-
-              let counter = 1;
-              let uniqueName = finalName;
-              while (this._profileList.some(p => p.name === uniqueName)) {
-                 uniqueName = `${finalName} (${counter})`;
-                 counter++;
-              }
-
-              const aliases = Array.from(new Set([gId, uniqueName, finalName, this._configEntriesMap[gId], ...group.displayNames].filter(Boolean).map(v => String(v).trim()).filter(Boolean)));
-              this._profilesData[gId] = { id: gId, name: uniqueName, years: group.years, map: group.map, aliases };
-              this._profileList.push(this._profilesData[gId]);
-          });
-
-          this._profileList.sort((a, b) => a.name.localeCompare(b.name));
-          
-          this.applyDefaultProfileSelection({ force: options.forceDefault === true || options.reason === 'config-default-profile-changed' });
           await this.loadProfileItems(this._currentProfileId);
+          if (!this.isConnected || generation !== this._scanGeneration) return;
           this.refreshAvailableYearsForCurrentProfile();
-
           this.updateData();
-
       } catch (err) {
-          console.error("Lỗi khi build profile data:", err);
+          console.error('[ShoppingHistory] Data refresh failed:', err);
           this._isError = true;
           this._errorMsg = err.message || String(err);
           this.renderHeaderAndTabs();
-          this.renderError();
+          if (!this._hasRenderedContent) this.renderError();
+          if (this._scanRetryCount < this._maxScanRetries && this.isConnected) {
+              const delay = Math.min(1000 * (2 ** this._scanRetryCount++), 15000);
+              this.scheduleFullScan(delay, { reason: 'retry-error' });
+          } else {
+              this.renderError();
+          }
       } finally {
-          if (scanId === this._scanGeneration) {
-              this._isScanning = false;
-              if (this._scanAgainAfterCurrent) {
-                  this._scanAgainAfterCurrent = false;
-                  this.scheduleFullScan(100, { reason: 'queued-update' });
-              }
+          this._isScanning = false;
+          if (this._scanAgainAfterCurrent) {
+              this._scanAgainAfterCurrent = false;
+              this.scheduleFullScan(160, { reason: 'queued-update' });
           }
       }
     }
@@ -1334,6 +1291,14 @@
 
     attachGlobalListeners() {
         if(!this.card) return;
+        this.card.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const el = e.target.closest('[role="button"]');
+            if (!el || el.classList.contains('disabled')) return;
+            e.preventDefault();
+            el.click();
+        });
+
         this.card.addEventListener('click', (e) => {
             const btnReload = e.target.closest('#btn-reload');
             const btnErrorReload = e.target.closest('#btn-error-reload');
@@ -1748,11 +1713,11 @@
         const chromeSignature = this.getChromeSignature(title, configIcon);
         if (!force && chromeSignature === this._lastChromeSignature) return;
         this._lastChromeSignature = chromeSignature;
-        const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${configIcon}"></ha-icon>` : `<span class="emoji-icon">${configIcon}</span>`;
+        const iconHtml = configIcon.includes(":") ? `<ha-icon icon="${esc(configIcon)}"></ha-icon>` : `<span class="emoji-icon">${esc(configIcon)}</span>`;
 
         this._els.header.innerHTML = `
-            <div class="header-left">${iconHtml} ${title}</div>
-            <div class="btn-reload" id="btn-reload" title="Tải lại dữ liệu"><ha-icon icon="mdi:refresh"></ha-icon></div>
+            <div class="header-left">${iconHtml} ${esc(title)}</div>
+            <div class="btn-reload" id="btn-reload" title="Tải lại dữ liệu" role="button" tabindex="0" aria-label="Tải lại dữ liệu"><ha-icon icon="mdi:refresh"></ha-icon></div>
         `;
 
         if (this._isError) {
@@ -1770,7 +1735,7 @@
         if (this._els.topbar) {
             this._els.topbar.innerHTML = `
                 <div class="profile-selector">
-                    <ha-icon class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
+                    <ha-icon role="button" tabindex="0" aria-label="Chuyển hồ sơ" class="profile-nav" icon="mdi:chevron-left" id="prev-profile" style="opacity: ${prevOpacity}; pointer-events: ${prevPointer}"></ha-icon>
                     <div class="profile-info-wrapper">
                         <ha-icon icon="mdi:account-box-outline" style="color: var(--accent); font-size: 18px; flex-shrink: 0;"></ha-icon>
                         <select id="profile-select">
@@ -1780,10 +1745,10 @@
                             }
                         </select>
                     </div>
-                    <ha-icon class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
+                    <ha-icon role="button" tabindex="0" aria-label="Chuyển hồ sơ" class="profile-nav" icon="mdi:chevron-right" id="next-profile" style="opacity: ${nextOpacity}; pointer-events: ${nextPointer}"></ha-icon>
                 </div>
                 
-                <div class="tab search-tab-btn ${this._activeTab === 'search' ? 'active' : ''}" data-target="search" title="Tra cứu & Bảo hành">
+                <div role="button" tabindex="0" class="tab search-tab-btn ${this._activeTab === 'search' ? 'active' : ''}" data-target="search" title="Tra cứu & Bảo hành">
                     <ha-icon icon="mdi:magnify" style="flex-shrink: 0;"></ha-icon>
                     <span class="st-text">Tra cứu</span>
                 </div>
@@ -1792,8 +1757,8 @@
 
         if (this._els.tabs) {
             this._els.tabs.innerHTML = `
-               <div class="tab ${this._activeTab === 'history' ? 'active' : ''}" data-target="history">📋 Lịch sử</div>
-               <div class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm / Sửa</div>
+               <div role="button" tabindex="0" class="tab ${this._activeTab === 'history' ? 'active' : ''}" data-target="history">📋 Lịch sử</div>
+               <div role="button" tabindex="0" class="tab ${this._activeTab === 'add' ? 'active' : ''}" data-target="add">➕ Thêm / Sửa</div>
             `;
         }
     }
@@ -1820,7 +1785,7 @@
             <div class="error-state fade-in">
                 <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
                 <div class="empty-title">Lỗi tải dữ liệu</div>
-                <div class="error-msg">${this._errorMsg}</div>
+                <div class="error-msg">${esc(this._errorMsg)}</div>
                 <button class="btn-primary" id="btn-error-reload"><ha-icon icon="mdi:refresh"></ha-icon> Thử Tải Lại Thẻ</button>
             </div>
         `;
@@ -1873,20 +1838,20 @@
         return `
           <div class="controls fade-in">
             <div class="control-box">
-              <ha-icon class="nav-btn ${yPrevDisabled}" id="prev-year" icon="mdi:chevron-left"></ha-icon>
+              <ha-icon role="button" tabindex="0" aria-label="Thay đổi thời gian" class="nav-btn ${yPrevDisabled}" id="prev-year" icon="mdi:chevron-left"></ha-icon>
               <select id="year-select">
                 ${this._availableYears.map(y => `<option value="${y}" ${this._selectedYear === y ? 'selected' : ''}>${y}</option>`).join('')}
                 ${this._availableYears.length === 0 ? `<option value="">---</option>` : ''}
               </select>
-              <ha-icon class="nav-btn ${yNextDisabled}" id="next-year" icon="mdi:chevron-right"></ha-icon>
+              <ha-icon role="button" tabindex="0" aria-label="Thay đổi thời gian" class="nav-btn ${yNextDisabled}" id="next-year" icon="mdi:chevron-right"></ha-icon>
             </div>
             <div class="control-box">
-              <ha-icon class="nav-btn ${mPrevDisabled}" id="prev-month" icon="mdi:chevron-left"></ha-icon>
+              <ha-icon role="button" tabindex="0" aria-label="Thay đổi thời gian" class="nav-btn ${mPrevDisabled}" id="prev-month" icon="mdi:chevron-left"></ha-icon>
               <select id="month-select">
                 <option value="all" ${this._selectedMonth === 'all' ? 'selected' : ''}>Cả năm</option>
                 ${this._availableMonths.map(m => `<option value="${m}" ${this._selectedMonth == m ? 'selected' : ''}>Tháng ${m}</option>`).join('')}
               </select>
-              <ha-icon class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
+              <ha-icon role="button" tabindex="0" aria-label="Thay đổi thời gian" class="nav-btn ${mNextDisabled}" id="next-month" icon="mdi:chevron-right"></ha-icon>
             </div>
           </div>
           <div style="font-size: clamp(13px, 3.5vw, 16px); font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;" class="fade-in">
@@ -2190,8 +2155,8 @@
                 </div>
                 ${!isSearchMode ? `
                 <div class="col-action">
-                  <ha-icon class="btn-edit" icon="mdi:pencil-outline" data-id="${item.id}" title="Sửa"></ha-icon>
-                  <ha-icon class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
+                  <ha-icon role="button" tabindex="0" aria-label="Sửa đơn hàng" class="btn-edit" icon="mdi:pencil-outline" data-id="${item.id}" title="Sửa"></ha-icon>
+                  <ha-icon role="button" tabindex="0" aria-label="Xóa đơn hàng" class="btn-delete" icon="mdi:delete-outline" data-id="${item.id}" title="Xóa"></ha-icon>
                 </div>` : ''}
               </div>
               
@@ -2216,11 +2181,11 @@
 
         return `
           <div class="pagination-container">
-            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="1" icon="mdi:chevron-double-left"></ha-icon>
-            <ha-icon class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage - 1}" icon="mdi:chevron-left"></ha-icon>
+            <ha-icon role="button" tabindex="0" aria-label="Chuyển trang" class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="1" icon="mdi:chevron-double-left"></ha-icon>
+            <ha-icon role="button" tabindex="0" aria-label="Chuyển trang" class="page-btn ${currentPage === 1 ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage - 1}" icon="mdi:chevron-left"></ha-icon>
             <div class="page-info">${currentPage} / ${totalPages}</div>
-            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage + 1}" icon="mdi:chevron-right"></ha-icon>
-            <ha-icon class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${totalPages}" icon="mdi:chevron-double-right"></ha-icon>
+            <ha-icon role="button" tabindex="0" aria-label="Chuyển trang" class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${currentPage + 1}" icon="mdi:chevron-right"></ha-icon>
+            <ha-icon role="button" tabindex="0" aria-label="Chuyển trang" class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" data-type="${type}" data-page="${totalPages}" icon="mdi:chevron-double-right"></ha-icon>
           </div>
         `;
     }
@@ -2248,6 +2213,7 @@
     }
 
     async executeDelete() {
+      if (this._mutationInProgress) return;
       const entryId = this._currentProfileId;
       if (!entryId) {
           alert("Không tìm thấy ID Hồ sơ!");
@@ -2256,7 +2222,8 @@
       }
       
       const orderId = this._itemToDelete;
-      
+      if (!Number.isInteger(orderId) || orderId < 1) return;
+      this._mutationInProgress = true;
       try {
           await this.callServiceWithTimeout('shopping_history', 'delete_order', { entry_id: entryId, order_id: orderId });
           this.closeDeleteModal();
@@ -2264,10 +2231,13 @@
       } catch(err) {
           alert("Lỗi khi xóa từ Home Assistant: " + err.message);
           this.closeDeleteModal();
+      } finally {
+          this._mutationInProgress = false;
       }
     }
 
     async handleAddSubmit(formEl) {
+      if (this._mutationInProgress) return;
       const entryId = this._currentProfileId;
       if (!entryId) return alert("Hệ thống chưa tải xong kết nối hoặc chưa có Hồ sơ.\n\nVui lòng tải lại trang hoặc đợi một chút.");
 
@@ -2295,6 +2265,9 @@
           data.order_id = this._editingOrder.id;
       }
 
+      this._mutationInProgress = true;
+      const submitButton = formEl.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
       try {
           await this.callServiceWithTimeout('shopping_history', serviceName, data);
           formEl.reset();
@@ -2303,6 +2276,9 @@
           this.scheduleFullScan(250, { force: true, reason: serviceName });
       } catch(err) {
           alert("Lỗi khi lưu: " + err.message);
+      } finally {
+          this._mutationInProgress = false;
+          if (submitButton) submitButton.disabled = false;
       }
     }
   }
@@ -2331,7 +2307,7 @@
         name: "Lịch Sử Mua Sắm",
         description: "Quản lý & theo dõi lịch sử mua sắm với bảo hành và thống kê chi tiêu.",
         preview: true,
-        documentationURL: "https://github.com/home-assistant/",
+        documentationURL: "https://github.com/khaisilk1910/shopping_history",
       });
     }
 

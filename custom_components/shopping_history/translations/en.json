@@ -1,0 +1,28 @@
+{
+  "title": "Shopping History",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create shopping profile",
+        "description": "Purchase data is stored locally in Home Assistant.",
+        "data": {
+          "friendly_name": "Profile name"
+        }
+      }
+    },
+    "error": {
+      "name_required": "Enter a profile name"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Profile options",
+        "description": "Dashboard cards work even if yearly sensors are disabled.",
+        "data": {
+          "yearly_sensors": "Create yearly spending sensors"
+        }
+      }
+    }
+  }
+}

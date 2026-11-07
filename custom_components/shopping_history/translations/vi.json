@@ -1,0 +1,28 @@
+{
+  "title": "Lịch Sử Mua Hàng",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tạo hồ sơ mua sắm",
+        "description": "Dữ liệu lưu cục bộ trong Home Assistant.",
+        "data": {
+          "friendly_name": "Tên hồ sơ"
+        }
+      }
+    },
+    "error": {
+      "name_required": "Vui lòng nhập tên hồ sơ"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tùy chọn hồ sơ",
+        "description": "Thay đổi tùy chọn sensor. Thẻ dashboard vẫn hoạt động khi tắt sensor.",
+        "data": {
+          "yearly_sensors": "Tạo sensor tổng chi tiêu theo năm"
+        }
+      }
+    }
+  }
+}
